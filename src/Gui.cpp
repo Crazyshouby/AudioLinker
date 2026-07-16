@@ -2,6 +2,7 @@
 #include "DeviceManager.h"
 #include "AudioEngine.h"
 #include "Calibrator.h"
+#include "Log.h"
 #include "PolicyConfig.h"
 #include "resource.h"
 
@@ -48,6 +49,8 @@ constexpr UINT_PTR IDT_STATUS_TIMER = 1;
 constexpr UINT_PTR IDT_DEVICE_REFRESH = 2;
 // Polls the mic calibration worker (see Calibrator) for UI progress.
 constexpr UINT_PTR IDT_CAL_TIMER = 3;
+// Drives the automatic latency optimizer (see OptimizerTick).
+constexpr UINT_PTR IDT_OPT_TIMER = 4;
 constexpr UINT WM_TRAYICON = WM_APP + 1;
 constexpr UINT WM_DEVICES_CHANGED = WM_APP + 2;
 constexpr int HOTKEY_TOGGLE_GROUP = 1;   // Ctrl+Alt+G
@@ -151,6 +154,20 @@ AudioEngine g_engine;
 Calibrator g_calibrator;
 bool g_calibrating = false;
 bool g_calRestartAfter = false;
+
+// Automatic latency optimizer: steps the ring cushion down while playback
+// stays clean (no new underruns across a measurement window), backs off when
+// glitches appear, and stops at the lowest stable value -- so the user gets
+// their machine's real latency floor without trial and error. State lives
+// here; the logic is OptimizerTick(), driven by IDT_OPT_TIMER.
+bool g_optimizing = false;
+bool g_optSettle = false;       // skip this window: a change just landed, let it settle
+bool g_optBackingOff = false;   // currently raising the cushion after a glitch
+uint64_t g_optBaselineGlitches = 0;
+int g_optTicks = 0;
+constexpr int kOptStepMs = 20;
+constexpr int kOptWindowMs = 3500;
+constexpr int kOptMaxTicks = 60; // hard stop (~3.5min) against any pathological loop
 std::vector<AudioDeviceInfo> g_outputDevices;
 std::map<std::wstring, OutputSettings> g_settings;
 std::vector<Setup> g_setups;
@@ -181,6 +198,13 @@ int g_masterVolumePercent = 100;
 // it can be edited from the UI and persisted -- see the "cushion"/
 // "cushioncommit" web commands.
 int g_baseCushionMs = kDefaultBaseCushionMs;
+// Mirrors AudioEngine's device-buffer fill target (kDefaultDeviceFillMs) --
+// see the "devicefill"/"devicefillcommit" web commands. Cushion + fill is
+// the bulk of the group's total latency vs. native playback.
+int g_deviceFillMs = kDefaultDeviceFillMs;
+// Low-latency period toggle (IAudioClient3) -- see AudioEngine::setLowLatency
+// and the "lowlatency" web command. Persisted as [group]/lowlatency.
+bool g_lowLatency = false;
 // Customizable global hotkeys (see FormatHotkey/RebindHotkey/LoadHotkeysFromIni).
 UINT g_toggleHotkeyMods = MOD_CONTROL | MOD_ALT;
 UINT g_toggleHotkeyVk = 'G';
@@ -357,6 +381,10 @@ void SaveConfig() {
                                g_configPath.c_str());
     WritePrivateProfileStringW(L"group", L"cushionms", std::to_wstring(g_baseCushionMs).c_str(),
                                g_configPath.c_str());
+    WritePrivateProfileStringW(L"group", L"devicefillms", std::to_wstring(g_deviceFillMs).c_str(),
+                               g_configPath.c_str());
+    WritePrivateProfileStringW(L"group", L"lowlatency", g_lowLatency ? L"1" : L"0",
+                               g_configPath.c_str());
     WritePrivateProfileStringW(L"group", L"theme", std::to_wstring(g_themeOverride).c_str(),
                                g_configPath.c_str());
     WritePrivateProfileStringW(L"hotkeys", L"togglemods", std::to_wstring(g_toggleHotkeyMods).c_str(),
@@ -392,6 +420,7 @@ int ClampChannelMode(int v) { return std::min(2, std::max(0, v)); }
 int ClampVolume(int v) { return std::min(100, std::max(0, v)); }
 int ClampLatencyMs(int v) { return std::min(500, std::max(0, v)); }
 int ClampCushionMs(int v) { return std::min(kMaxBaseCushionMs, std::max(kMinBaseCushionMs, v)); }
+int ClampDeviceFillMs(int v) { return std::min(kMaxDeviceFillMs, std::max(kMinDeviceFillMs, v)); }
 int ClampThemeOverride(int v) { return std::min(2, std::max(0, v)); }
 
 // The volume actually sent to the engine: the speaker's own slider scaled by
@@ -964,6 +993,11 @@ void SendState() {
                      L",\"cushionMs\":" + std::to_wstring(g_baseCushionMs) +
                      L",\"cushionMsMin\":" + std::to_wstring(kMinBaseCushionMs) +
                      L",\"cushionMsMax\":" + std::to_wstring(kMaxBaseCushionMs) +
+                     L",\"deviceFillMs\":" + std::to_wstring(g_deviceFillMs) +
+                     L",\"deviceFillMsMin\":" + std::to_wstring(kMinDeviceFillMs) +
+                     L",\"deviceFillMsMax\":" + std::to_wstring(kMaxDeviceFillMs) +
+                     L",\"lowLatency\":" + BoolJson(g_lowLatency) +
+                     L",\"optimizing\":" + BoolJson(g_optimizing) +
                      L",\"theme\":" + std::to_wstring(g_themeOverride) +
                      L",\"toggleHotkey\":\"" + JsonEscape(FormatHotkey(g_toggleHotkeyMods, g_toggleHotkeyVk)) +
                      L"\",\"switcherHotkey\":\"" + JsonEscape(FormatHotkey(g_switcherHotkeyMods, g_switcherHotkeyVk)) +
@@ -1476,6 +1510,93 @@ void Open() {
 
 } // namespace switcher
 
+// --- Automatic latency optimizer ---
+
+// Total underruns/drops across every active output right now -- the signal
+// the optimizer watches. Rising during a window means the current cushion is
+// too low for this machine's scheduling.
+uint64_t TotalGlitches() {
+    uint64_t total = 0;
+    for (const auto& st : g_engine.getStatus()) {
+        total += st.underruns + st.driftCorrections;
+    }
+    return total;
+}
+
+void ApplyOptimizerCushion(int ms) {
+    g_baseCushionMs = ClampCushionMs(ms);
+    g_engine.setBaseCushionMs(g_baseCushionMs);
+    g_engine.resyncAllOutputs();
+}
+
+void StopOptimizer(HWND hwnd, const std::wstring& infoMsg) {
+    KillTimer(hwnd, IDT_OPT_TIMER);
+    g_optimizing = false;
+    SaveConfig();
+    SendState();
+    if (!infoMsg.empty()) SendInfo(infoMsg);
+}
+
+// One measurement window. Steps the cushion down while clean; on the first
+// glitchy window it backs off (raises the cushion) and stops once clean
+// again, landing on the lowest stable value.
+void OptimizerTick(HWND hwnd) {
+    if (!g_engine.isRunning()) { StopOptimizer(hwnd, L"Optimisation interrompue : le groupe s'est arrêté."); return; }
+    if (++g_optTicks > kOptMaxTicks) { StopOptimizer(hwnd, L"Optimisation terminée."); return; }
+
+    if (g_optSettle) {
+        // A cushion change just landed; ignore its transient and start a
+        // fresh clean-window measurement from here.
+        g_optSettle = false;
+        g_optBaselineGlitches = TotalGlitches();
+        return;
+    }
+
+    bool glitched = TotalGlitches() > g_optBaselineGlitches;
+    if (glitched) {
+        if (g_baseCushionMs >= kMaxBaseCushionMs) {
+            StopOptimizer(hwnd, L"Optimisation : craquements persistants même à la marge maximale. "
+                                L"C'est probablement le lien Bluetooth, pas AudioLinker.");
+            return;
+        }
+        ApplyOptimizerCushion(g_baseCushionMs + kOptStepMs);
+        g_optBackingOff = true;
+        g_optSettle = true;
+        SendState(); // cushion slider follows live
+    } else {
+        if (g_optBackingOff) {
+            StopOptimizer(hwnd, L"Optimisation terminée : marge stable trouvée à " +
+                                std::to_wstring(g_baseCushionMs) + L" ms.");
+            return;
+        }
+        if (g_baseCushionMs <= kMinBaseCushionMs) {
+            StopOptimizer(hwnd, L"Optimisation terminée : latence minimale (" +
+                                std::to_wstring(g_baseCushionMs) + L" ms) atteinte sans craquement.");
+            return;
+        }
+        ApplyOptimizerCushion(g_baseCushionMs - kOptStepMs);
+        g_optSettle = true;
+        SendState();
+    }
+}
+
+void StartOptimizer(HWND hwnd) {
+    if (g_optimizing) return;
+    if (!g_engine.isRunning()) {
+        SendError(L"Démarrez le groupe avant de lancer l'optimisation de la latence.");
+        return;
+    }
+    g_optimizing = true;
+    g_optBackingOff = false;
+    g_optSettle = true; // first window just seeds the baseline
+    g_optTicks = 0;
+    g_optBaselineGlitches = TotalGlitches();
+    SetTimer(hwnd, IDT_OPT_TIMER, kOptWindowMs, nullptr);
+    SendInfo(L"Optimisation en cours… la marge est réduite progressivement, "
+             L"gardez une lecture audio active pendant la mesure.");
+    SendState();
+}
+
 // --- Group start/stop ---
 
 void OnCreateGroup(HWND hwnd) {
@@ -1584,6 +1705,10 @@ void OnCreateGroup(HWND hwnd) {
     }
     SaveRoutedAppsToIni();
 
+    LOG_INFO(L"Démarrage du groupe « " + groupName + L" » : " + std::to_wstring(outputs.size()) +
+             L" sortie(s), source " + (needSystemSource ? L"système" : L"application") +
+             L", marge " + std::to_wstring(g_baseCushionMs) + L"ms, tampon " +
+             std::to_wstring(g_deviceFillMs) + L"ms, basse latence " + (g_lowLatency ? L"ON" : L"OFF") + L".");
     std::wstring error;
     if (!g_engine.start(sourceId, loopback, masterVolumeId, outputs, error)) {
         // Only the synchronous pre-checks (already running, nothing selected)
@@ -1604,6 +1729,7 @@ void OnCreateGroup(HWND hwnd) {
 
 void OnStop(HWND hwnd) {
     KillTimer(hwnd, IDT_STATUS_TIMER);
+    if (g_optimizing) { KillTimer(hwnd, IDT_OPT_TIMER); g_optimizing = false; }
     g_awaitingGroupStart = false;
     g_playingSetup.clear();
     g_engine.stop();
@@ -1897,7 +2023,7 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
         }
         g_calRestartAfter = g_engine.isRunning();
         if (g_calRestartAfter) OnStop(hwnd);
-        if (!g_calibrator.start(rest, ids)) return;
+        if (!g_calibrator.start(rest, ids, g_deviceFillMs)) return;
         g_calibrating = true;
         SetTimer(hwnd, IDT_CAL_TIMER, 250, nullptr);
         SendCalStatus();
@@ -1941,6 +2067,46 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
         SaveConfig();
         return;
     }
+    if (cmd == L"devicefill") {
+        g_deviceFillMs = ClampDeviceFillMs(_wtoi(rest.c_str()));
+        g_engine.setDeviceFillMs(g_deviceFillMs);
+        return;
+    }
+    if (cmd == L"devicefillcommit") {
+        // The fill change shifts audio between the device buffer and the
+        // ring; the resync re-targets the ring immediately instead of
+        // letting the ±0.15% correction chew on it for minutes.
+        if (g_engine.isRunning()) g_engine.resyncAllOutputs();
+        SaveConfig();
+        return;
+    }
+    if (cmd == L"optimize") {
+        if (rest == L"start") StartOptimizer(hwnd);
+        else if (rest == L"cancel") StopOptimizer(hwnd, L"Optimisation annulée.");
+        return;
+    }
+    if (cmd == L"openlog") {
+        // Opens the diagnostic log in the user's default text viewer.
+        wchar_t buf[MAX_PATH] = {};
+        if (GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH) > 0) {
+            std::wstring path = std::wstring(buf) + L"\\AudioLinker\\audiolinker.log";
+            ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        }
+        return;
+    }
+    if (cmd == L"lowlatency") {
+        g_lowLatency = (rest == L"1");
+        g_engine.setLowLatency(g_lowLatency);
+        SaveConfig();
+        // Only takes effect on the next group start (the period is fixed at
+        // stream init) -- restart a running group so the change is live now.
+        if (g_engine.isRunning()) {
+            OnStop(hwnd);
+            OnCreateGroup(hwnd);
+        }
+        SendState();
+        return;
+    }
     if (cmd == L"theme") {
         g_themeOverride = ClampThemeOverride(_wtoi(rest.c_str()));
         ApplyWindowTheme(g_mainWnd);
@@ -1957,6 +2123,10 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
         SetLaunchAtStartup(false);
         g_baseCushionMs = kDefaultBaseCushionMs;
         g_engine.setBaseCushionMs(g_baseCushionMs);
+        g_deviceFillMs = kDefaultDeviceFillMs;
+        g_engine.setDeviceFillMs(g_deviceFillMs);
+        g_lowLatency = false;
+        g_engine.setLowLatency(false);
         if (g_engine.isRunning()) g_engine.resyncAllOutputs();
         g_themeOverride = 0;
         ApplyWindowTheme(g_mainWnd);
@@ -2474,6 +2644,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             g_baseCushionMs = ClampCushionMs(static_cast<int>(GetPrivateProfileIntW(
                 L"group", L"cushionms", kDefaultBaseCushionMs, g_configPath.c_str())));
             g_engine.setBaseCushionMs(g_baseCushionMs);
+            g_deviceFillMs = ClampDeviceFillMs(static_cast<int>(GetPrivateProfileIntW(
+                L"group", L"devicefillms", kDefaultDeviceFillMs, g_configPath.c_str())));
+            g_engine.setDeviceFillMs(g_deviceFillMs);
+            g_lowLatency = GetPrivateProfileIntW(L"group", L"lowlatency", 0, g_configPath.c_str()) != 0;
+            g_engine.setLowLatency(g_lowLatency);
             g_themeOverride = ClampThemeOverride(
                 static_cast<int>(GetPrivateProfileIntW(L"group", L"theme", 0, g_configPath.c_str())));
             LoadHotkeysFromIni();
@@ -2606,6 +2781,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 SendState();
                 return 0;
             }
+            if (wParam == IDT_OPT_TIMER) {
+                if (g_optimizing) OptimizerTick(hwnd);
+                return 0;
+            }
             if (wParam == IDT_CAL_TIMER) {
                 SendCalStatus(); // includes the final (running=false) snapshot
                 if (g_calibrating && !g_calibrator.isRunning()) {
@@ -2658,6 +2837,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     g_awaitingGroupStart = false;
                     std::wstring error;
                     if (g_engine.takeStartError(error)) {
+                        LOG_ERROR(L"Échec du démarrage du groupe : " + error);
                         KillTimer(hwnd, IDT_STATUS_TIMER);
                         UnrouteAllApps();
                         if (!g_previousDefaultId.empty()) {
@@ -2749,6 +2929,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 } // namespace
 
 int RunApplication(HINSTANCE hInstance, int nCmdShow, bool startHidden, bool waitForPrevious) {
+    LogInit();
     // Single instance: a second launch would mean two tray icons, hotkey
     // registrations silently failing, and two processes writing the same
     // ini. The mutex is held (owned) for this process's whole lifetime.

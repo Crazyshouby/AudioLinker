@@ -30,10 +30,21 @@ constexpr double kSpectrumBandFreqs[kSpectrumBandCount] = {
 // setting -- see CushionSamples() in AudioEngine.cpp. User-adjustable
 // tradeoff: lower means less total latency, higher means more headroom
 // against crackling when the capture/render threads occasionally don't get
-// scheduled promptly (e.g. under CPU load).
-constexpr int kDefaultBaseCushionMs = 300;
-constexpr int kMinBaseCushionMs = 50;
+// scheduled promptly (e.g. under CPU load). Was 300 for a while: that had
+// been widened chasing crackles later traced to Bluetooth radio bandwidth,
+// which no amount of application-side cushion can absorb.
+constexpr int kDefaultBaseCushionMs = 150;
+constexpr int kMinBaseCushionMs = 30;
 constexpr int kMaxBaseCushionMs = 800;
+
+// Target backlog (ms) kept queued in each output's WASAPI device buffer.
+// The buffer itself stays allocated at 150ms (kRenderBufferDuration), but
+// only this much is kept filled: the allocation is glitch headroom, the
+// fill is pure added latency, identically on every output. 60ms is ~6
+// device periods of slack for an event-driven MMCSS "Pro Audio" thread.
+constexpr int kDefaultDeviceFillMs = 60;
+constexpr int kMinDeviceFillMs = 20;
+constexpr int kMaxDeviceFillMs = 150;
 
 struct OutputLinkConfig {
     std::wstring deviceId;
@@ -116,6 +127,15 @@ public:
     // (see kDefaultBaseCushionMs). Just updates the target -- call
     // resyncAllOutputs() afterwards to snap to it immediately.
     void setBaseCushionMs(int ms);
+    // Global target backlog kept in every output's device buffer (see
+    // kDefaultDeviceFillMs). Applied live by each render thread; call
+    // resyncAllOutputs() afterwards so the ring re-targets immediately.
+    void setDeviceFillMs(int ms);
+    // Global low-latency toggle: when on, render streams request the
+    // driver's minimum IAudioClient3 engine period (~2.7ms) instead of the
+    // classic ~10ms one, where supported. Read when each output (re)starts,
+    // so a live change only takes effect on the next group start.
+    void setLowLatency(bool on);
     // Same idea as resyncOutput() but for every output at once -- used after
     // a base-cushion change (slider commit) instead of one output at a time.
     void resyncAllOutputs();

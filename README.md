@@ -1,11 +1,18 @@
 # AudioLinker
 
+[![Build](https://github.com/Crazyshouby/AudioLinker/actions/workflows/build.yml/badge.svg)](https://github.com/Crazyshouby/AudioLinker/actions/workflows/build.yml)
+
 Application Windows pour diffuser l'audio du PC sur **plusieurs sorties simultanément** (enceintes, casques, Bluetooth, HDMI…), avec latence, volume, égaliseur et canal réglables par sortie — le tout synchronisé.
+
+## Téléchargement
+
+L'exécutable prêt à l'emploi est publié dans les [Releases](https://github.com/Crazyshouby/AudioLinker/releases) (chaque version taguée `v*` déclenche une compilation automatique). Sinon, voir [Compilation](#compilation) ci-dessous.
 
 ## Fonctionnalités
 
 - **Groupe multi-enceintes** : capture système (via câble virtuel) ou **capture par application** (Process Loopback) redistribuée vers autant de sorties que voulu.
 - **Synchronisation** : latence ajustable par sortie (0–500 ms), correction de dérive d'horloge continue (resampler ±0,15 %, inaudible), reconnexion automatique des sorties perdues (Bluetooth qui décroche…).
+- **Latence maîtrisée** : marge et tampon de sortie réglables, mode basse latence (période audio minimale `IAudioClient3`), et **optimiseur automatique** qui trouve le réglage le plus bas sans craquement sur votre machine.
 - **Calage automatique au micro** : joue un balayage sonore sur chaque enceinte, mesure son retard acoustique réel avec un micro placé à la position d'écoute (corrélation croisée), et aligne toutes les latences sur l'enceinte la plus lente.
 - **Par sortie** : volume, mute, canal (stéréo / gauche / droite), égaliseur 5 bandes avec spectre temps réel, VU-mètres.
 - **Setups** : configurations nommées, applicables via l'UI, le menu tray, un switcher global (`Ctrl+Alt+S`) ou `Ctrl+Maj+1-9`.

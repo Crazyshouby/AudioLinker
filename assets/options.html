@@ -63,6 +63,8 @@ body {
   cursor: pointer; transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 .ghost-btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent); background: rgba(var(--accent-rgb),0.08); }
+.ghost-btn.on { color: #fff; background: var(--accent); border-color: var(--accent); }
+.ghost-btn:disabled { opacity: 0.45; cursor: default; }
 
 /* Must out-specificity ".row > label" above (which sets width:auto;flex:1
    for the plain text labels here) so the toggle pill keeps its fixed size
@@ -123,10 +125,34 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.05); }
     <button class="ghost-btn" id="hkSwitcherBtn"></button>
   </div>
   <div class="row">
-    <label>Latence / anti-craquements</label>
-    <input type="range" id="sCushion" min="50" max="800" step="10"
-           title="Marge ajoutée par AudioLinker par rapport à la lecture native, sur chaque sortie. Plus bas = moins de latence ; plus haut = plus de résistance aux craquements sous charge CPU.">
+    <label>Marge anti-craquements</label>
+    <input type="range" id="sCushion" min="30" max="800" step="10"
+           title="Réserve interne absorbant les à-coups d'ordonnancement (charge CPU). Plus bas = moins de latence ; plus haut = plus de résistance aux craquements. Ne compense PAS les coupures radio Bluetooth.">
     <span class="val" id="vCushion"></span>
+  </div>
+  <div class="row">
+    <label>Tampon de sortie</label>
+    <input type="range" id="sDeviceFill" min="20" max="150" step="10"
+           title="Quantité d'audio maintenue dans le tampon de chaque périphérique. Plus bas = moins de latence ; plus haut = plus de tolérance aux blocages système brefs.">
+    <span class="val" id="vDeviceFill"></span>
+  </div>
+  <div class="row">
+    <label id="latencyEstimate" style="cursor:default;font-size:12px;color:var(--faint)"></label>
+  </div>
+  <div class="row">
+    <label class="switch"><input type="checkbox" id="lowLatency"><span class="track"></span></label>
+    <label class="switch-label" for="lowLatency"
+           title="Utilise la période audio minimale du pilote (IAudioClient3) quand elle est disponible. Latence plus basse, mais moins tolérant aux à-coups. Redémarre le groupe.">
+      Mode basse latence (périphériques compatibles)</label>
+  </div>
+  <div class="row">
+    <button class="ghost-btn" id="optimizeBtn" style="flex:1"
+            title="Réduit automatiquement la marge jusqu'au réglage le plus bas sans craquement. Démarrez le groupe d'abord.">
+      Optimiser la latence automatiquement</button>
+  </div>
+  <div class="row" style="justify-content:flex-end">
+    <button class="ghost-btn" id="openLogBtn" style="font-size:11.5px;padding:4px 10px">
+      Ouvrir le journal de diagnostic</button>
   </div>
   <div class="row">
     <label>Thème</label>
@@ -153,9 +179,20 @@ const post = m => { if (bridge) bridge.postMessage(m); };
 
 let state = {
   autostart: false, launchAtStartup: false,
-  cushionMs: 300, cushionMsMin: 50, cushionMsMax: 800, theme: 0,
+  cushionMs: 150, cushionMsMin: 30, cushionMsMax: 800,
+  deviceFillMs: 60, deviceFillMsMin: 20, deviceFillMsMax: 150,
+  lowLatency: false, optimizing: false, running: false, theme: 0,
   toggleHotkey: "Ctrl+Alt+G", switcherHotkey: "Ctrl+Alt+S", capturingHotkey: "",
 };
+
+// Cushion + device fill dominate the group's latency vs. native playback;
+// ~20ms covers the capture side (virtual cable + polling). Purely
+// indicative -- Bluetooth links add their own (per-device) latency on top.
+function renderLatencyEstimate() {
+  const total = (state.cushionMs ?? 150) + (state.deviceFillMs ?? 60) + 20;
+  $("#latencyEstimate").textContent =
+    `Latence totale du groupe ≈ ${total} ms (hors latence propre au Bluetooth)`;
+}
 
 function paintRange(el) {
   const min = +el.min, max = +el.max, v = +el.value;
@@ -173,11 +210,28 @@ function renderAll() {
   $("#launchWin").checked = !!state.launchAtStartup;
 
   const el = $("#sCushion");
-  el.min = state.cushionMsMin ?? 50;
+  el.min = state.cushionMsMin ?? 30;
   el.max = state.cushionMsMax ?? 800;
-  el.value = state.cushionMs ?? 300;
+  el.value = state.cushionMs ?? 150;
   paintRange(el);
-  $("#vCushion").textContent = (state.cushionMs ?? 300) + " ms";
+  $("#vCushion").textContent = (state.cushionMs ?? 150) + " ms";
+
+  const fill = $("#sDeviceFill");
+  fill.min = state.deviceFillMsMin ?? 20;
+  fill.max = state.deviceFillMsMax ?? 150;
+  fill.value = state.deviceFillMs ?? 60;
+  paintRange(fill);
+  $("#vDeviceFill").textContent = (state.deviceFillMs ?? 60) + " ms";
+  $("#lowLatency").checked = !!state.lowLatency;
+  const optBtn = $("#optimizeBtn");
+  optBtn.textContent = state.optimizing ? "Optimisation en cours… (annuler)"
+                                        : "Optimiser la latence automatiquement";
+  optBtn.classList.toggle("on", !!state.optimizing);
+  optBtn.disabled = !state.running && !state.optimizing;
+  optBtn.title = state.running || state.optimizing
+    ? "Réduit automatiquement la marge jusqu'au réglage le plus bas sans craquement."
+    : "Démarrez le groupe d'abord, puis lancez l'optimisation.";
+  renderLatencyEstimate();
 
   const capturing = state.capturingHotkey || "";
   const listening = "Ctrl/Alt/Maj/Win + une touche… (Échap pour annuler)";
@@ -201,9 +255,31 @@ $("#sCushion").addEventListener("input", () => {
   state.cushionMs = +el.value;
   paintRange(el);
   $("#vCushion").textContent = state.cushionMs + " ms";
+  renderLatencyEstimate();
   post("cushion|" + state.cushionMs);
 });
 $("#sCushion").addEventListener("change", () => post("cushioncommit"));
+
+$("#sDeviceFill").addEventListener("input", () => {
+  const el = $("#sDeviceFill");
+  state.deviceFillMs = +el.value;
+  paintRange(el);
+  $("#vDeviceFill").textContent = state.deviceFillMs + " ms";
+  renderLatencyEstimate();
+  post("devicefill|" + state.deviceFillMs);
+});
+$("#sDeviceFill").addEventListener("change", () => post("devicefillcommit"));
+
+$("#lowLatency").addEventListener("change", () => {
+  state.lowLatency = $("#lowLatency").checked;
+  post("lowlatency|" + (state.lowLatency ? 1 : 0));
+});
+
+$("#optimizeBtn").addEventListener("click", () => {
+  post("optimize|" + (state.optimizing ? "cancel" : "start"));
+});
+
+$("#openLogBtn").addEventListener("click", () => post("openlog"));
 
 // The actual key combo is captured natively (a low-level keyboard hook on
 // the C++ side, see StartHotkeyCapture/HotkeyCaptureHookProc) instead of a

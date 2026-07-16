@@ -1,6 +1,7 @@
 #include "AudioEngine.h"
 #include "Resampler.h"
 #include "Eq.h"
+#include "Log.h"
 
 #include <mmdeviceapi.h>
 #include <audioclient.h>
@@ -39,16 +40,26 @@ bool isSupportedFormat(const WAVEFORMATEX* wfx) {
 }
 
 // Baseline cushion kept in every output's ring buffer on top of its
-// configured extra latency. Absorbs small scheduling jitter between the
-// capture thread and each independent render thread/device clock -- widened
-// from 150ms after reports of crackling that got worse under CPU load (i.e.
-// the capture/render threads occasionally not getting scheduled promptly
-// enough to keep up, not clock drift). This is a passive listening app, not
-// a monitoring/gaming setup, so the extra fixed latency is inaudible as
-// latency and applies uniformly to every output, so it doesn't affect sync
-// between them. User-adjustable via setBaseCushionMs() -- see
-// kDefaultBaseCushionMs in AudioEngine.h for the tradeoff.
+// configured extra latency. Absorbs scheduling jitter between the capture
+// thread and each independent render thread/device clock (not clock drift,
+// which the resampler corrects). It applies uniformly to every output, so
+// it never affects sync between them -- only the group's absolute latency
+// vs. the source. User-adjustable via setBaseCushionMs() -- see
+// kDefaultBaseCushionMs in AudioEngine.h for the tradeoff. (It sat at 300ms
+// for a while, widened chasing crackles that were later traced to Bluetooth
+// radio bandwidth -- something no application-side cushion can absorb.)
 std::atomic<int> g_baseCushionMs{kDefaultBaseCushionMs};
+// Target device-buffer backlog -- see kDefaultDeviceFillMs in AudioEngine.h.
+// The render loop tops the WASAPI buffer up to this level only, instead of
+// keeping the whole 150ms allocation full: that full allocation used to add
+// a flat ~150ms of latency to every output.
+std::atomic<int> g_deviceFillMs{kDefaultDeviceFillMs};
+// When on, render (and capture) streams are initialized with IAudioClient3's
+// minimum shared-mode period instead of the classic ~10ms one, on drivers
+// that support it -- tighter callbacks and a smaller device-buffer floor, so
+// the fill target can go genuinely lower. Off by default: the smaller buffer
+// is less forgiving of scheduling hiccups. See AudioEngine::setLowLatency.
+std::atomic<bool> g_lowLatency{false};
 // Linear fade-in applied to the first few ms of audio played right after a
 // hard drift-correction drop, so the jump to a different point in the stream
 // isn't an audible click.
@@ -415,6 +426,14 @@ void AudioEngine::setBaseCushionMs(int ms) {
     g_baseCushionMs.store(std::clamp(ms, kMinBaseCushionMs, kMaxBaseCushionMs));
 }
 
+void AudioEngine::setDeviceFillMs(int ms) {
+    g_deviceFillMs.store(std::clamp(ms, kMinDeviceFillMs, kMaxDeviceFillMs));
+}
+
+void AudioEngine::setLowLatency(bool on) {
+    g_lowLatency.store(on);
+}
+
 void AudioEngine::resyncAllOutputs() {
     std::lock_guard<std::mutex> lock(outputsMutex_);
     for (auto& state : outputs_) {
@@ -609,6 +628,9 @@ void AudioEngine::captureThreadProc(std::wstring sourceId, bool loopback, std::w
     } while (false);
 
     if (!ok) {
+        LOG_ERROR(processMode
+            ? L"Capture par application (PID " + std::to_wstring(sourcePid) + L") impossible à démarrer."
+            : L"Capture système (câble virtuel) impossible à démarrer.");
         running_ = false;
         if (mixFormat) CoTaskMemFree(mixFormat);
         if (captureEvent) CloseHandle(captureEvent);
@@ -778,6 +800,53 @@ void AudioEngine::renderThreadProc(OutputState* state) {
     if (mmcssHandle) AvRevertMmThreadCharacteristics(mmcssHandle);
 }
 
+namespace {
+
+// Initializes an event-driven shared-mode render stream. When low-latency
+// mode is on and the driver exposes IAudioClient3, requests its minimum
+// engine period (often ~2.7ms / 128 frames vs. the classic ~10ms) so
+// callbacks come faster and the device-buffer floor is smaller. Returns the
+// negotiated buffer size in *bufferFrames. Falls back to the classic 150ms
+// Initialize on any failure -- many drivers report no sub-10ms period, and
+// InitializeSharedAudioStream is picky about the exact engine format.
+// `label` is just for the log line.
+bool InitLowLatencyRender(IAudioClient* client, const WAVEFORMATEX* fmt, HANDLE evt,
+                          UINT32* bufferFrames, const std::wstring& label) {
+    if (g_lowLatency.load()) {
+        ComPtr<IAudioClient3> client3;
+        if (SUCCEEDED(client->QueryInterface(__uuidof(IAudioClient3),
+                                             reinterpret_cast<void**>(client3.GetAddressOf())))) {
+            UINT32 def = 0, fundamental = 0, minPeriod = 0, maxPeriod = 0;
+            if (SUCCEEDED(client3->GetSharedModeEnginePeriod(fmt, &def, &fundamental,
+                                                             &minPeriod, &maxPeriod)) &&
+                minPeriod > 0 && minPeriod < def) {
+                HRESULT hr = client3->InitializeSharedAudioStream(
+                    AUDCLNT_STREAMFLAGS_EVENTCALLBACK, minPeriod, fmt, nullptr);
+                if (SUCCEEDED(hr) && SUCCEEDED(client->SetEventHandle(evt)) &&
+                    SUCCEEDED(client->GetBufferSize(bufferFrames))) {
+                    LOG_INFO(L"Basse latence OK sur " + label + L" : période " +
+                             std::to_wstring(minPeriod) + L" trames (défaut " +
+                             std::to_wstring(def) + L"), tampon " + std::to_wstring(*bufferFrames));
+                    return true;
+                }
+                LOG_WARN(L"Basse latence refusée sur " + label + L" (" + log_detail::Hr(hr) +
+                         L") — repli sur le mode standard.");
+            }
+        }
+    }
+    // Classic path: 150ms allocation, only the fill target kept queued.
+    HRESULT hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                                    1500000, 0, fmt, nullptr);
+    if (FAILED(hr)) {
+        LOG_ERROR(L"Initialize (rendu) a échoué sur " + label + L" : " + log_detail::Hr(hr));
+        return false;
+    }
+    if (FAILED(client->SetEventHandle(evt))) return false;
+    return SUCCEEDED(client->GetBufferSize(bufferFrames));
+}
+
+} // namespace
+
 AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, bool firstSession) {
     ComPtr<IMMDeviceEnumerator> enumerator;
     ComPtr<IMMDevice> device;
@@ -797,21 +866,23 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
         if (!renderEvent) break;
         enumerator = CreateDeviceEnumerator();
         if (!enumerator) break;
-        if (FAILED(enumerator->GetDevice(state->deviceId.c_str(), device.GetAddressOf()))) break;
-        if (FAILED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
-                                     reinterpret_cast<void**>(audioClient.GetAddressOf())))) break;
+        HRESULT hrGet = enumerator->GetDevice(state->deviceId.c_str(), device.GetAddressOf());
+        if (FAILED(hrGet)) { LOG_ERROR(L"GetDevice (rendu) : " + log_detail::Hr(hrGet)); break; }
+        HRESULT hrAct = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
+                                         reinterpret_cast<void**>(audioClient.GetAddressOf()));
+        if (FAILED(hrAct)) { LOG_ERROR(L"Activate IAudioClient (rendu) : " + log_detail::Hr(hrAct)); break; }
         if (FAILED(audioClient->GetMixFormat(&mixFormat))) break;
-        if (!isSupportedFormat(mixFormat)) break;
+        if (!isSupportedFormat(mixFormat)) {
+            LOG_WARN(L"Format non géré sur une sortie (bits/éch = " +
+                     std::to_wstring(mixFormat->wBitsPerSample) + L") — sortie ignorée.");
+            break;
+        }
 
         state->channels = mixFormat->nChannels;
         state->sampleRate = mixFormat->nSamplesPerSec;
 
-        REFERENCE_TIME bufferDuration = 1500000; // 150ms of device-side headroom under CPU load
-        if (FAILED(audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED,
-                                            AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-                                            bufferDuration, 0, mixFormat, nullptr))) break;
-        if (FAILED(audioClient->SetEventHandle(renderEvent))) break;
-        if (FAILED(audioClient->GetBufferSize(&bufferFrameCount))) break;
+        if (!InitLowLatencyRender(audioClient.Get(), mixFormat, renderEvent, &bufferFrameCount,
+                                  state->deviceId)) break;
         if (FAILED(audioClient->GetService(__uuidof(IAudioRenderClient),
                                             reinterpret_cast<void**>(renderClient.GetAddressOf())))) break;
         // Best-effort: feeds the device-lag estimate used by auto-alignment.
@@ -819,9 +890,15 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
                                 reinterpret_cast<void**>(audioClock.GetAddressOf()));
         if (audioClock && FAILED(audioClock->GetFrequency(&clockFreq))) audioClock.Reset();
 
+        // Pre-roll silence up to the fill target only (not the whole
+        // allocation): anything above the target would just be extra
+        // one-time latency that the capped fill loop then drains anyway.
+        UINT32 prerollFrames = static_cast<UINT32>(
+            static_cast<int64_t>(g_deviceFillMs.load()) * mixFormat->nSamplesPerSec / 1000);
+        if (prerollFrames > bufferFrameCount) prerollFrames = bufferFrameCount;
         BYTE* data = nullptr;
-        if (FAILED(renderClient->GetBuffer(bufferFrameCount, &data))) break;
-        renderClient->ReleaseBuffer(bufferFrameCount, AUDCLNT_BUFFERFLAGS_SILENT);
+        if (FAILED(renderClient->GetBuffer(prerollFrames, &data))) break;
+        renderClient->ReleaseBuffer(prerollFrames, AUDCLNT_BUFFERFLAGS_SILENT);
 
         if (firstSession) {
             state->ring->writeSilence(CushionSamples(state->latencyMs.load(), state->sampleRate.load(),
@@ -908,7 +985,20 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
             end = RenderSessionEnd::Lost; // typically AUDCLNT_E_DEVICE_INVALIDATED
             break;
         }
-        UINT32 framesAvailable = bufferFrameCount - padding;
+        // Empty device buffer mid-session = the device ran dry (this thread
+        // stalled longer than the fill target): WASAPI played silence, an
+        // audible gap. Surfaces in the same ⚠ counter as ring underruns so
+        // a fill target set too low for this machine shows up in the UI.
+        if (padding == 0) state->underruns.fetch_add(1);
+        // Top the device buffer up to the configured fill target only, not
+        // to the whole 150ms allocation: what sits in this buffer is flat
+        // latency on every output, while the allocation beyond it is free
+        // glitch headroom. Read per callback so the Options slider applies
+        // live (a resync then snaps the ring to the shifted total).
+        UINT32 fillFrames = static_cast<UINT32>(
+            static_cast<int64_t>(g_deviceFillMs.load()) * state->sampleRate.load() / 1000);
+        if (fillFrames > bufferFrameCount) fillFrames = bufferFrameCount;
+        UINT32 framesAvailable = (padding < fillFrames) ? fillFrames - padding : 0;
 
         if (framesAvailable > 0) {
             BYTE* buf = nullptr;
