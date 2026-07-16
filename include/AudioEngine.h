@@ -62,6 +62,11 @@ struct OutputLinkConfig {
 struct OutputStatus {
     std::wstring deviceId;
     bool active = false;
+    // The capture source feeding this output is currently gone (captured app
+    // closed, or the system capture device dropped and is being retried):
+    // the output plays silence but the group keeps running.
+    bool sourceLost = false;
+    unsigned long sourcePid = 0; // 0 = system source (see OutputLinkConfig)
     uint64_t underruns = 0;
     uint64_t driftCorrections = 0;
     double peak = 0.0; // peak amplitude 0..1 since the previous getStatus()
@@ -173,6 +178,12 @@ private:
         std::atomic<int> deviceLagMs{0}; // see OutputStatus::deviceLagMs
         std::atomic<bool> forceResync{false};
         std::atomic<double> speedAdjustment{1.0};
+        // True while this output's capture source is gone (see
+        // OutputStatus::sourceLost). Set by the capture thread's retry loop,
+        // cleared when a capture session re-establishes; the render thread
+        // freezes its drift controller and stops counting underruns while
+        // it's up (silence is expected, not a glitch).
+        std::atomic<bool> sourceLost{false};
         // Frames (as raw sample count) the render thread wants the capture
         // thread to pad the ring with on its next write. Once formatReady is
         // set, the render thread is this ring's sole reader and must never
@@ -196,6 +207,17 @@ private:
     // whose sourcePid matches -- every ring keeps a single producer.
     void captureThreadProc(std::wstring sourceId, bool loopback, std::wstring masterVolumeDeviceId,
                            unsigned long sourcePid);
+    // One WASAPI capture session, mirroring runRenderSession: InitFailed if
+    // the stream never got going, Lost on a mid-session failure (device
+    // invalidated, captured app gone), Stopped on a clean stop(). The outer
+    // captureThreadProc loop decides whether to retry -- a failure here must
+    // never take the whole engine down.
+    enum class CaptureSessionEnd { InitFailed, Lost, Stopped };
+    CaptureSessionEnd runCaptureSession(const std::wstring& sourceId, bool loopback,
+                                        const std::wstring& masterVolumeDeviceId,
+                                        unsigned long sourcePid, bool firstSession);
+    // Flips sourceLost on every output fed by this source.
+    void markSourceLost(unsigned long sourcePid, bool lost);
     // Outer loop: runs one device session at a time and, once the group has
     // started successfully, keeps retrying after a device loss (unplugged
     // Bluetooth, disabled endpoint...) until stop() -- the output rejoins
@@ -220,6 +242,11 @@ private:
     std::mutex startErrorMutex_;
     std::wstring startError_;
     std::atomic<bool> hasStartError_{false};
+    // Capture threads whose FIRST session failed to initialize -- checked by
+    // the starter's fail-fast window so a bad start is still reported as a
+    // whole-group failure (runtime losses, by contrast, only pause their own
+    // source's outputs).
+    std::atomic<int> captureInitFails_{0};
 
     // Mirrors the Windows-controlled volume/mute of masterVolumeDeviceId,
     // kept live by an IAudioEndpointVolumeCallback registered from

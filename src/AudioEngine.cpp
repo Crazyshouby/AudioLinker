@@ -248,6 +248,7 @@ bool AudioEngine::start(const std::wstring& sourceId, bool sourceIsLoopback,
     running_ = true;
     starting_ = true;
     hasStartError_ = false;
+    captureInitFails_ = 0;
     masterVolumeScalar_ = 1.0f;
     masterMuted_ = false;
 
@@ -313,7 +314,7 @@ void AudioEngine::starterThreadProc(std::wstring sourceId, bool sourceIsLoopback
     // negotiation failure, vanished app) so a bad start is still reported,
     // just not synchronously to the original caller anymore.
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    if (!running_.load()) {
+    if (!running_.load() || captureInitFails_.load() > 0) {
         failStart(L"Impossible d'initialiser le périphérique source.");
         return;
     }
@@ -448,6 +449,8 @@ std::vector<OutputStatus> AudioEngine::getStatus() {
         OutputStatus s;
         s.deviceId = state->deviceId;
         s.active = state->active.load();
+        s.sourceLost = state->sourceLost.load();
+        s.sourcePid = state->sourcePid;
         s.underruns = state->underruns.load();
         s.driftCorrections = state->driftCorrections.load();
         s.peak = state->peakMilli.exchange(0) / 1000.0;
@@ -545,12 +548,72 @@ void AudioEngine::identifyOutput(const std::wstring& deviceId) {
     }).detach();
 }
 
+namespace {
+
+// Whether the process-loopback target still exists -- distinguishes "the
+// captured app closed" (permanent: PIDs never come back) from a transient
+// WASAPI failure worth retrying.
+bool ProcessStillAlive(unsigned long pid) {
+    HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(pid));
+    if (!h) return GetLastError() == ERROR_ACCESS_DENIED; // exists, just protected
+    DWORD wait = WaitForSingleObject(h, 0);
+    CloseHandle(h);
+    return wait == WAIT_TIMEOUT;
+}
+
+} // namespace
+
+void AudioEngine::markSourceLost(unsigned long sourcePid, bool lost) {
+    std::lock_guard<std::mutex> lock(outputsMutex_);
+    for (auto& out : outputs_) {
+        if (out->sourcePid == sourcePid) out->sourceLost = lost;
+    }
+}
+
 void AudioEngine::captureThreadProc(std::wstring sourceId, bool loopback, std::wstring masterVolumeDeviceId,
                                      unsigned long sourcePid) {
     ComScope com;
     TimerResolutionScope timerRes;
     HANDLE mmcssHandle = EnableProAudioMmcss();
+    const bool processMode = (sourcePid != 0);
 
+    bool firstSession = true;
+    while (running_.load()) {
+        CaptureSessionEnd end = runCaptureSession(sourceId, loopback, masterVolumeDeviceId,
+                                                  sourcePid, firstSession);
+        if (end == CaptureSessionEnd::Stopped || !running_.load()) break;
+        if (firstSession && end == CaptureSessionEnd::InitFailed) {
+            // The first session failing to init still fails the whole group
+            // start, exactly as before -- the starter's fail-fast window
+            // checks captureInitFails_.
+            captureInitFails_.fetch_add(1);
+            markSourceLost(sourcePid, true);
+            break;
+        }
+        firstSession = false;
+
+        // Mid-session loss: only THIS source's outputs go quiet (silence +
+        // « source perdue » in the UI); the rest of the group keeps playing.
+        markSourceLost(sourcePid, true);
+        if (processMode && !ProcessStillAlive(sourcePid)) {
+            LOG_WARN(L"L'application capturée (PID " + std::to_wstring(sourcePid) +
+                     L") s'est terminée : ses sorties passent en silence, le reste du groupe continue.");
+            break; // a PID never comes back -- stays marked until stop()
+        }
+        LOG_WARN(processMode
+            ? L"Capture de l'application (PID " + std::to_wstring(sourcePid) +
+                  L") perdue — nouvelle tentative dans 2 s."
+            : L"Capture système perdue — nouvelle tentative dans 2 s.");
+        for (int i = 0; i < 20 && running_.load(); ++i) Sleep(100);
+    }
+
+    if (mmcssHandle) AvRevertMmThreadCharacteristics(mmcssHandle);
+}
+
+AudioEngine::CaptureSessionEnd AudioEngine::runCaptureSession(
+        const std::wstring& sourceId, bool loopback,
+        const std::wstring& masterVolumeDeviceId,
+        unsigned long sourcePid, bool firstSession) {
     ComPtr<IMMDeviceEnumerator> enumerator;
     ComPtr<IMMDevice> device;
     ComPtr<IAudioClient> audioClient;
@@ -631,11 +694,9 @@ void AudioEngine::captureThreadProc(std::wstring sourceId, bool loopback, std::w
         LOG_ERROR(processMode
             ? L"Capture par application (PID " + std::to_wstring(sourcePid) + L") impossible à démarrer."
             : L"Capture système (câble virtuel) impossible à démarrer.");
-        running_ = false;
         if (mixFormat) CoTaskMemFree(mixFormat);
         if (captureEvent) CloseHandle(captureEvent);
-        if (mmcssHandle) AvRevertMmThreadCharacteristics(mmcssHandle);
-        return;
+        return CaptureSessionEnd::InitFailed;
     }
 
     // Follow the Windows-controlled volume/mute of the virtual cable's render
@@ -679,16 +740,25 @@ void AudioEngine::captureThreadProc(std::wstring sourceId, bool loopback, std::w
             if (out->sourcePid != sourcePid) continue;
             out->resampler.configure(srcChannels, srcRate,
                                      out->channels.load(), out->sampleRate.load());
+            if (!firstSession) {
+                // Recovery from a lost session: pad requests accumulated
+                // while there was no writer are stale, and the ring must
+                // snap back to its cushion target at the next drift tick.
+                out->silencePadFrames.store(0);
+                out->forceResync = true;
+                out->sourceLost = false;
+            }
         }
     }
 
     std::vector<float> floatBuf;
     std::vector<float> converted;
 
+    CaptureSessionEnd end = CaptureSessionEnd::Stopped;
     while (running_.load()) {
         UINT32 packetLength = 0;
         if (FAILED(captureClient->GetNextPacketSize(&packetLength))) {
-            running_ = false;
+            end = CaptureSessionEnd::Lost;
             break;
         }
 
@@ -697,7 +767,7 @@ void AudioEngine::captureThreadProc(std::wstring sourceId, bool loopback, std::w
             UINT32 numFrames = 0;
             DWORD flags = 0;
             if (FAILED(captureClient->GetBuffer(&data, &numFrames, &flags, nullptr, nullptr))) {
-                running_ = false;
+                end = CaptureSessionEnd::Lost;
                 break;
             }
 
@@ -750,10 +820,11 @@ void AudioEngine::captureThreadProc(std::wstring sourceId, bool loopback, std::w
             }
 
             if (FAILED(captureClient->GetNextPacketSize(&packetLength))) {
-                running_ = false;
+                end = CaptureSessionEnd::Lost;
                 packetLength = 0;
             }
         }
+        if (end == CaptureSessionEnd::Lost) break;
 
         if (processMode) {
             // Signaled once per period while the app plays; the timeout keeps
@@ -767,7 +838,7 @@ void AudioEngine::captureThreadProc(std::wstring sourceId, bool loopback, std::w
     if (volCallbackRegistered) endpointVolume->UnregisterControlChangeNotify(&volCallback);
     audioClient->Stop();
     if (captureEvent) CloseHandle(captureEvent);
-    if (mmcssHandle) AvRevertMmThreadCharacteristics(mmcssHandle);
+    return end;
 }
 
 void AudioEngine::renderThreadProc(OutputState* state) {
@@ -989,7 +1060,7 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
         // stalled longer than the fill target): WASAPI played silence, an
         // audible gap. Surfaces in the same ⚠ counter as ring underruns so
         // a fill target set too low for this machine shows up in the UI.
-        if (padding == 0) state->underruns.fetch_add(1);
+        if (padding == 0 && !state->sourceLost.load()) state->underruns.fetch_add(1);
         // Top the device buffer up to the configured fill target only, not
         // to the whole 150ms allocation: what sits in this buffer is flat
         // latency on every output, while the allocation beyond it is free
@@ -1026,7 +1097,8 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
                 }
 
                 if (got < scratch.size()) {
-                    state->underruns.fetch_add(1);
+                    // Expected silence while the source is gone, a glitch otherwise.
+                    if (!state->sourceLost.load()) state->underruns.fetch_add(1);
                     // Fade the tail of the real audio we did get down to zero
                     // instead of cutting it off mid-waveform, and ramp the
                     // next callback's audio back in once real data resumes.
@@ -1147,6 +1219,13 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
         ULONGLONG now = GetTickCount64();
         if (now - lastDriftCheck > 1000) { // Check every 1 second
             lastDriftCheck = now;
+            // Nothing to rate-match and no writer to service pad requests
+            // while the source is gone; the capture session's re-init
+            // clears the flag and forces a resync itself when it comes back.
+            if (state->sourceLost.load()) {
+                state->speedAdjustment.store(1.0);
+                continue;
+            }
             int channels = state->channels.load();
             int sampleRate = state->sampleRate.load();
             size_t targetSamples = CushionSamples(state->latencyMs.load(), sampleRate, channels);

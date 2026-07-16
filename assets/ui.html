@@ -1357,13 +1357,16 @@ window.addEventListener("keydown", ev => {
 // Devices that dropped out mid-playback (Bluetooth cut...); the engine keeps
 // retrying them, we surface the transition both ways as toasts.
 const lostIds = new Set();
+// Outputs whose capture source is gone (captured app closed, system capture
+// retrying): they play silence but the rest of the group keeps going.
+const lostSourceIds = new Set();
 
 function applyStatus(m) {
   const headerDirty = (m.running !== state.running) || (m.starting !== state.starting);
   state.running = m.running;
   state.starting = m.starting;
   if (headerDirty) renderHeader();
-  if (!m.running) lostIds.clear();
+  if (!m.running) { lostIds.clear(); lostSourceIds.clear(); }
   for (const [id, r] of rowRefs) {
     const st = m.outputs && m.outputs.find(o => o.id === id);
     if (id === selectedId) {
@@ -1378,14 +1381,26 @@ function applyStatus(m) {
         lostIds.delete(id);
         if (d) toast(`${displayName(d)} : reconnectée`, "ok");
       }
+      if (st.sourceLost && !lostSourceIds.has(id)) {
+        lostSourceIds.add(id);
+        if (d) toast(`${displayName(d)} : source fermée — sortie en silence`);
+      } else if (!st.sourceLost && lostSourceIds.has(id)) {
+        lostSourceIds.delete(id);
+        if (d) toast(`${displayName(d)} : source rétablie`, "ok");
+      }
       r.wasActive = st.active;
       r.row.classList.toggle("active", st.active);
       const w = Math.sqrt(Math.min(1, Math.max(0, st.peak))) * 100;
       r.fill.style.width = w.toFixed(1) + "%";
       r.fill.classList.toggle("hot", st.peak > 0.85);
-      const g = (st.underruns || 0) + (st.drift || 0);
-      r.glitch.hidden = g === 0;
-      r.glitch.textContent = `⚠ ${st.underruns}/${st.drift}`;
+      if (st.sourceLost) {
+        r.glitch.hidden = false;
+        r.glitch.textContent = "⚠ source perdue";
+      } else {
+        const g = (st.underruns || 0) + (st.drift || 0);
+        r.glitch.hidden = g === 0;
+        r.glitch.textContent = `⚠ ${st.underruns}/${st.drift}`;
+      }
     } else {
       r.wasActive = undefined;
       r.row.classList.remove("active");
