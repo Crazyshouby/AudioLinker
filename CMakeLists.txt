@@ -10,6 +10,7 @@ add_executable(AudioLinker WIN32
     src/DeviceManager.cpp
     src/AudioEngine.cpp
     src/Calibrator.cpp
+    src/Log.cpp
     assets/AudioLinker.rc
     # CMake merges .manifest sources into the exe's embedded manifest via
     # mt.exe -- carries the PerMonitorV2 DPI-awareness declaration.
