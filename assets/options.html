@@ -52,7 +52,7 @@ body {
   user-select: none;
   overflow: hidden;
 }
-#app { display: grid; gap: 16px; height: 100%; padding: 20px; align-content: start; }
+#app { display: grid; gap: 14px; height: 100%; padding: 20px; align-content: start; overflow-y: auto; }
 
 .row { display: flex; align-items: center; gap: 12px; }
 .row > label { width: auto; flex: 1; font-size: 13px; color: var(--muted); cursor: pointer; }
@@ -163,7 +163,7 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.05); }
     </select>
   </div>
   <div class="sep"></div>
-  <div class="row" style="justify-content:flex-end">
+  <div class="row" style="justify-content:flex-end;flex-wrap:wrap">
     <button class="ghost-btn" id="exportBtn">Exporter la configuration…</button>
     <button class="ghost-btn" id="importBtn">Importer une configuration…</button>
     <button class="ghost-btn" id="resetBtn">Réinitialiser aux valeurs par défaut</button>

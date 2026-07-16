@@ -964,7 +964,13 @@ std::wstring JsonEscape(const std::wstring& s) {
 }
 
 void PostJson(const std::wstring& json) {
-    if (g_webview) g_webview->PostWebMessageAsJson(json.c_str());
+    // Never poke the main WebView while its window is hidden: it may be
+    // suspended (see SuspendMainWebView) and a message would wake the whole
+    // page just to update something nobody can see. RestoreFromTray re-sends
+    // the full state on the way back.
+    if (g_webview && g_mainWnd && IsWindowVisible(g_mainWnd)) {
+        g_webview->PostWebMessageAsJson(json.c_str());
+    }
     if (g_optionsWebview) g_optionsWebview->PostWebMessageAsJson(json.c_str());
 }
 
@@ -1066,6 +1072,28 @@ void SendStatus() {
     // getStatus() is a destructive read (peak resets to 0), so it is called
     // exactly once per timer tick, here.
     auto status = g_engine.getStatus();
+
+    // A captured app that died no longer takes the engine down (its outputs
+    // just play silence), so the group's stop path won't unroute it anytime
+    // soon -- put it back on its normal endpoint now, or relaunching the app
+    // would land its audio in the virtual cable with nobody capturing that
+    // old PID anymore. Only once the process is really gone: a transient
+    // capture loss (source retried while the app lives) must keep the route.
+    for (const auto& st : status) {
+        if (!st.sourceLost || st.sourcePid == 0) continue;
+        auto it = std::find(g_routedPids.begin(), g_routedPids.end(),
+                            static_cast<DWORD>(st.sourcePid));
+        if (it == g_routedPids.end()) continue;
+        HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, *it);
+        if (h) {
+            bool alive = WaitForSingleObject(h, 0) == WAIT_TIMEOUT;
+            CloseHandle(h);
+            if (alive) continue;
+        }
+        SetAppRenderEndpoint(*it, L"");
+        g_routedPids.erase(it);
+        SaveRoutedAppsToIni();
+    }
     std::wstring j = L"{\"type\":\"status\",\"running\":" + BoolJson(g_engine.isRunning()) +
                      L",\"starting\":" + BoolJson(g_engine.isStarting()) + L",\"outputs\":[";
     for (size_t i = 0; i < status.size(); ++i) {
@@ -1075,6 +1103,7 @@ void SendStatus() {
         swprintf(peakBuf, 16, L"%.3f", st.peak);
         j += L"{\"id\":\"" + JsonEscape(st.deviceId) +
              L"\",\"active\":" + BoolJson(st.active) +
+             L",\"sourceLost\":" + BoolJson(st.sourceLost) +
              L",\"peak\":" + peakBuf +
              L",\"underruns\":" + std::to_wstring(st.underruns) +
              L",\"drift\":" + std::to_wstring(st.driftCorrections) +
@@ -1230,6 +1259,7 @@ void StartHotkeyCapture(int id) {
 // shouldn't start audio that wasn't already playing.
 void ApplySetup(HWND hwnd, const std::wstring& name, bool ensureRunning = false); // defined with the setup actions below
 void OpenOptionsWindow(HWND owner); // defined with the WebView2 bootstrap below
+void SuspendMainWebView();          // idem (background-footprint helpers)
 
 void CloseSwitcherHook() {
     if (g_switcherWheelHook) {
@@ -1950,6 +1980,11 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
             g_autostartPending = false;
             if (!g_engine.isRunning() && !g_engine.isStarting()) OnCreateGroup(hwnd);
         }
+        // --tray launch: the page was loaded into a window that has never
+        // been shown and may never be this session -- don't keep a full
+        // Chromium render tree warm for it. (No-op when the window is
+        // visible, e.g. this ready came from the Options page.)
+        if (g_mainWnd && !IsWindowVisible(g_mainWnd)) SuspendMainWebView();
         return;
     }
     if (cmd == L"toggle") { ToggleGroup(hwnd); return; }
@@ -2417,6 +2452,46 @@ void InitWebView(HWND hwnd) {
     if (FAILED(hr)) WebViewFatalError(hwnd);
 }
 
+// --- Background footprint ---
+// The app lives in the tray with its window hidden most of the time, but a
+// merely-invisible WebView2 keeps its full Chromium render tree warm
+// (150-250 MB across subprocesses). Suspending the page and asking the
+// browser process to trim (where the runtime supports both -- best-effort
+// QueryInterface otherwise) drops that to a fraction, for the cost of a
+// brief repaint at the next restore. The Options window is not involved:
+// its controller is destroyed outright when it closes.
+
+void SuspendMainWebView() {
+    if (!g_webviewController || !g_webview) return;
+    g_webviewController->put_IsVisible(FALSE); // TrySuspend requires hidden
+    ComPtr<ICoreWebView2_19> wv19;
+    if (SUCCEEDED(g_webview.As(&wv19)) && wv19) {
+        wv19->put_MemoryUsageTargetLevel(COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW);
+    }
+    ComPtr<ICoreWebView2_3> wv3;
+    if (SUCCEEDED(g_webview.As(&wv3)) && wv3) {
+        wv3->TrySuspend(Callback<ICoreWebView2TrySuspendCompletedHandler>(
+            [](HRESULT, BOOL) -> HRESULT { return S_OK; }).Get());
+    }
+}
+
+void ResumeMainWebView() {
+    if (!g_webviewController || !g_webview) return;
+    // put_IsVisible(TRUE) resumes a suspended page on its own; the explicit
+    // Resume() just removes any doubt about ordering across runtime versions.
+    ComPtr<ICoreWebView2_3> wv3;
+    BOOL suspended = FALSE;
+    if (SUCCEEDED(g_webview.As(&wv3)) && wv3 &&
+        SUCCEEDED(wv3->get_IsSuspended(&suspended)) && suspended) {
+        wv3->Resume();
+    }
+    ComPtr<ICoreWebView2_19> wv19;
+    if (SUCCEEDED(g_webview.As(&wv19)) && wv19) {
+        wv19->put_MemoryUsageTargetLevel(COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL);
+    }
+    g_webviewController->put_IsVisible(TRUE);
+}
+
 // --- Options window (real, separate, modal top-level window -- not an
 // in-page overlay, so it has its own title bar and can be moved/resized
 // independently of the main window) ---
@@ -2547,7 +2622,11 @@ void OpenOptionsWindow(HWND owner) {
         classRegistered = true;
     }
 
-    constexpr int kOptionsW = 480, kOptionsH = 400;
+    // Sized for the full settings list (hotkeys, the two latency sliders,
+    // low-latency toggle, optimizer, log, theme, import/export) -- if a
+    // future row pushes past this again, options.html scrolls (#app has
+    // overflow-y:auto) instead of clipping.
+    constexpr int kOptionsW = 520, kOptionsH = 600;
     UINT dpi = GetDpiForWindow(owner);
     if (dpi == 0) dpi = 96;
     RECT r = { 0, 0, MulDiv(kOptionsW, static_cast<int>(dpi), 96),
@@ -2621,7 +2700,11 @@ void RestoreFromTray(HWND hwnd) {
     ShowWindow(hwnd, SW_SHOW);
     ShowWindow(hwnd, SW_RESTORE);
     SetForegroundWindow(hwnd);
-    if (g_webviewController) g_webviewController->put_IsVisible(TRUE);
+    ResumeMainWebView();
+    // Everything that changed while the window was hidden (setup switched by
+    // hotkey, device hot-plugs...) was not posted to the page -- see
+    // PostJson -- so re-sync it now that someone can see it again.
+    SendState();
 }
 
 // --- Window ---
@@ -2682,7 +2765,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_SIZE:
             if (wParam == SIZE_MINIMIZED) {
                 ShowWindow(hwnd, SW_HIDE);
-                if (g_webviewController) g_webviewController->put_IsVisible(FALSE);
+                SuspendMainWebView();
             } else if (g_webviewController) {
                 RECT rc;
                 GetClientRect(hwnd, &rc);
@@ -2758,7 +2841,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
         case WM_CLOSE:
             ShowWindow(hwnd, SW_HIDE);
-            if (g_webviewController) g_webviewController->put_IsVisible(FALSE);
+            SuspendMainWebView();
             return 0;
         case WM_COMMAND: {
             int id = LOWORD(wParam);
