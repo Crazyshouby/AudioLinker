@@ -10,7 +10,10 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    # Pinned (not windows-latest): the "Visual Studio 17 2022" generator needs
+    # a VS 2022 instance on the image, which windows-latest no longer
+    # guarantees since it moved to the 2025 image.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
 
