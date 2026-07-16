@@ -31,8 +31,12 @@ class Calibrator {
 public:
     ~Calibrator();
 
-    // Starts a pass measuring outputIds in order. False if one is running.
-    bool start(const std::wstring& micId, const std::vector<std::wstring>& outputIds);
+    // Starts a pass measuring outputIds in order. deviceFillMs is the
+    // engine's current device-buffer fill target (see kDefaultDeviceFillMs):
+    // the sweep playback replicates it so the measured backlog matches what
+    // group playback will really have. False if a pass is already running.
+    bool start(const std::wstring& micId, const std::vector<std::wstring>& outputIds,
+               int deviceFillMs);
     void cancel(); // async: signals the worker and returns immediately
     bool isRunning() const { return running_.load(); }
 
@@ -52,6 +56,7 @@ private:
     std::thread worker_;
     std::atomic<bool> running_{false};
     std::atomic<bool> cancel_{false};
+    int deviceFillMs_ = 60; // set by start(), read only by the worker
 
     std::mutex mutex_;
     std::wstring error_;

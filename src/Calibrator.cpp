@@ -197,14 +197,15 @@ private:
 };
 
 // Plays warmup silence + the sweep + a listening tail on one output (its own
-// standalone shared-mode stream), keeping the mic drained throughout. On
-// success, dacHnsOut is when the sweep's first sample reached the DAC (per
-// GetCurrentPadding at submit time) and bufferMsOut the device buffer's
-// length -- the backlog a group render session keeps permanently full, added
-// back so the measured delay models real group playback.
+// standalone shared-mode stream), keeping the mic drained throughout. The
+// device buffer is topped up to fillMs only, replicating the engine's capped
+// fill. On success, dacHnsOut is when the sweep's first sample reached the
+// DAC (per GetCurrentPadding at submit time) and backlogMsOut the fill
+// actually applied -- the backlog group playback keeps, added back so the
+// measured delay models it.
 bool PlaySweep(IMMDeviceEnumerator* enumerator, const std::wstring& deviceId,
-               MicRecorder& mic, const std::atomic<bool>& cancel,
-               INT64& dacHnsOut, int& bufferMsOut) {
+               MicRecorder& mic, const std::atomic<bool>& cancel, int fillMs,
+               INT64& dacHnsOut, int& backlogMsOut) {
     ComPtr<IMMDevice> device;
     ComPtr<IAudioClient> client;
     ComPtr<IAudioRenderClient> render;
@@ -228,7 +229,9 @@ bool PlaySweep(IMMDeviceEnumerator* enumerator, const std::wstring& deviceId,
     if (FAILED(client->GetBufferSize(&bufferFrames)) || bufferFrames == 0) return false;
     if (FAILED(client->GetService(__uuidof(IAudioRenderClient),
                                    reinterpret_cast<void**>(render.GetAddressOf())))) return false;
-    bufferMsOut = static_cast<int>(static_cast<INT64>(bufferFrames) * 1000 / rate);
+    UINT32 fillFrames = static_cast<UINT32>(static_cast<INT64>(fillMs) * rate / 1000);
+    if (fillFrames > bufferFrames) fillFrames = bufferFrames;
+    backlogMsOut = static_cast<int>(static_cast<INT64>(fillFrames) * 1000 / rate);
 
     const std::vector<float> chirp = MakeChirp(rate);
     INT64 silenceLeft = static_cast<INT64>(rate * kWarmupSec);
@@ -241,7 +244,7 @@ bool PlaySweep(IMMDeviceEnumerator* enumerator, const std::wstring& deviceId,
         if (!mic.drain()) break;
         UINT32 padding = 0;
         if (FAILED(client->GetCurrentPadding(&padding))) break;
-        UINT32 avail = bufferFrames - padding;
+        UINT32 avail = (padding < fillFrames) ? fillFrames - padding : 0;
         if (avail > 0) {
             if (silenceLeft > 0) {
                 UINT32 n = static_cast<UINT32>(std::min<INT64>(avail, silenceLeft));
@@ -325,10 +328,12 @@ Calibrator::~Calibrator() {
     if (worker_.joinable()) worker_.join();
 }
 
-bool Calibrator::start(const std::wstring& micId, const std::vector<std::wstring>& outputIds) {
+bool Calibrator::start(const std::wstring& micId, const std::vector<std::wstring>& outputIds,
+                       int deviceFillMs) {
     if (running_.load()) return false;
     if (worker_.joinable()) worker_.join();
     cancel_ = false;
+    deviceFillMs_ = deviceFillMs;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         error_.clear();
@@ -398,8 +403,9 @@ void Calibrator::worker(std::wstring micId) {
     for (size_t i = 0; i < ids.size() && !cancel_.load(); ++i) {
         setState(i, CalState::Measuring);
         INT64 dacHns = 0;
-        int bufferMs = 0;
-        bool played = PlaySweep(enumerator.Get(), ids[i], mic, cancel_, dacHns, bufferMs);
+        int backlogMs = 0;
+        bool played = PlaySweep(enumerator.Get(), ids[i], mic, cancel_, deviceFillMs_,
+                                dacHns, backlogMs);
         if (played && !cancel_.load()) {
             // Let the recording catch up with the sweep's tail end.
             Sleep(150);
@@ -407,9 +413,10 @@ void Calibrator::worker(std::wstring micId) {
         }
         INT64 peakHns = 0;
         if (played && !cancel_.load() && FindSweep(mic, ref, dacHns, cancel_, peakHns)) {
-            // Post-buffer delay measured by the mic, plus the device buffer
-            // a group render session keeps full -- see PlaySweep.
-            INT64 ms = (peakHns - dacHns) / 10'000 + bufferMs;
+            // Post-buffer delay measured by the mic, plus the backlog a
+            // group render session keeps in the device buffer -- PlaySweep
+            // replicated the same capped fill.
+            INT64 ms = (peakHns - dacHns) / 10'000 + backlogMs;
             setState(i, CalState::Done, static_cast<int>(std::clamp<INT64>(ms, 0, 5000)));
         } else if (!cancel_.load()) {
             setState(i, CalState::Failed);
