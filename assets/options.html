@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Options — AudioLinker</title>
+<style>
+:root {
+  --bg: #0e1013;
+  --card-2: #1b202a;
+  --border: #262b35;
+  --border-soft: #1f232c;
+  --text: #eceef2;
+  --muted: #98a0ae;
+  --faint: #5c6370;
+  --track-off: #10131a;
+  --accent: #7c6fef;
+  --accent-2: #a78bfa;
+  --accent-rgb: 124, 111, 239;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #d4d5d9;
+    --card-2: #cfd1d5;
+    --border: #b8bbc1;
+    --border-soft: #c6c8cd;
+    --text: #1c1e23;
+    --muted: #525864;
+    --faint: #7d818b;
+    --track-off: #b9bcc2;
+    color-scheme: light;
+  }
+}
+/* Theme override selector on this same page (state.theme): the media query
+   above is just the "system/auto" default -- these win in both directions
+   once JS sets data-theme on <html> (see applyTheme()). */
+:root[data-theme="light"] {
+  --bg: #d4d5d9; --card-2: #cfd1d5; --border: #b8bbc1; --border-soft: #c6c8cd;
+  --text: #1c1e23; --muted: #525864; --faint: #7d818b; --track-off: #b9bcc2; color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #0e1013; --card-2: #1b202a; --border: #262b35; --border-soft: #1f232c;
+  --text: #eceef2; --muted: #98a0ae; --faint: #5c6370; --track-off: #10131a; color-scheme: dark;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  overflow: hidden;
+}
+#app { display: grid; gap: 16px; height: 100%; padding: 20px; align-content: start; }
+
+.row { display: flex; align-items: center; gap: 12px; }
+.row > label { width: auto; flex: 1; font-size: 13px; color: var(--muted); cursor: pointer; }
+
+.ghost-btn {
+  border: 1px solid var(--border); background: transparent; color: var(--muted);
+  border-radius: 8px; padding: 6px 14px; font: 12.5px "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  cursor: pointer; transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.ghost-btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent); background: rgba(var(--accent-rgb),0.08); }
+
+/* Must out-specificity ".row > label" above (which sets width:auto;flex:1
+   for the plain text labels here) so the toggle pill keeps its fixed size
+   instead of stretching to fill the row. */
+.switch, .row > label.switch { position: relative; width: 40px; height: 22px; flex: none; cursor: pointer; }
+.switch input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+.track {
+  position: absolute; inset: 0; border-radius: 11px; background: var(--card-2);
+  border: 1px solid var(--border); transition: all 0.2s; pointer-events: none;
+}
+.track::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+  border-radius: 50%; background: var(--faint); transition: all 0.2s;
+}
+.switch input:checked + .track { background: var(--accent); border-color: var(--accent); }
+.switch input:checked + .track::after { left: 20px; background: #fff; }
+
+input[type="range"] {
+  -webkit-appearance: none; flex: 1; height: 6px; border-radius: 3px; outline: none;
+  background: linear-gradient(to right, var(--accent) 0%, var(--accent) 50%, var(--track-off) 50%, var(--track-off) 100%);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; border: 2.5px solid var(--accent); cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.15s;
+}
+input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); box-shadow: 0 0 0 5px rgba(var(--accent-rgb),0.15); }
+input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.05); }
+.val { width: 56px; flex: none; text-align: right; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sep { height: 1px; background: var(--border-soft); margin: 2px 0; }
+
+#toast {
+  position: fixed; left: 50%; bottom: 20px; transform: translate(-50%, 16px);
+  background: #2a1d20; border: 1px solid rgba(239, 111, 111, 0.5); color: #ffd9d9;
+  border-radius: 10px; padding: 10px 18px; font-size: 13px; max-width: 85%;
+  opacity: 0; pointer-events: none; transition: opacity 0.25s, transform 0.25s;
+}
+#toast.ok { background: #182a20; border-color: rgba(61, 220, 132, 0.5); color: #c9f5dc; }
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="row">
+    <label class="switch"><input type="checkbox" id="autostart"><span class="track"></span></label>
+    <label class="switch-label" for="autostart">Recréer le groupe automatiquement à l'ouverture</label>
+  </div>
+  <div class="row">
+    <label class="switch"><input type="checkbox" id="launchWin"><span class="track"></span></label>
+    <label class="switch-label" for="launchWin">Lancer AudioLinker au démarrage de Windows (dans la zone de notification)</label>
+  </div>
+  <div class="row">
+    <label>Basculer le groupe</label>
+    <button class="ghost-btn" id="hkToggleBtn"></button>
+  </div>
+  <div class="row">
+    <label>Changer de setup</label>
+    <button class="ghost-btn" id="hkSwitcherBtn"></button>
+  </div>
+  <div class="row">
+    <label>Latence / anti-craquements</label>
+    <input type="range" id="sCushion" min="50" max="800" step="10"
+           title="Marge ajoutée par AudioLinker par rapport à la lecture native, sur chaque sortie. Plus bas = moins de latence ; plus haut = plus de résistance aux craquements sous charge CPU.">
+    <span class="val" id="vCushion"></span>
+  </div>
+  <div class="row">
+    <label>Thème</label>
+    <select class="ghost-btn" id="themeSelect" style="flex:1">
+      <option value="0">Système (Windows)</option>
+      <option value="1">Clair</option>
+      <option value="2">Sombre</option>
+    </select>
+  </div>
+  <div class="sep"></div>
+  <div class="row" style="justify-content:flex-end">
+    <button class="ghost-btn" id="exportBtn">Exporter la configuration…</button>
+    <button class="ghost-btn" id="importBtn">Importer une configuration…</button>
+    <button class="ghost-btn" id="resetBtn">Réinitialiser aux valeurs par défaut</button>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const bridge = window.chrome && window.chrome.webview;
+const post = m => { if (bridge) bridge.postMessage(m); };
+
+let state = {
+  autostart: false, launchAtStartup: false,
+  cushionMs: 300, cushionMsMin: 50, cushionMsMax: 800, theme: 0,
+  toggleHotkey: "Ctrl+Alt+G", switcherHotkey: "Ctrl+Alt+S", capturingHotkey: "",
+};
+
+function paintRange(el) {
+  const min = +el.min, max = +el.max, v = +el.value;
+  const p = ((v - min) / (max - min)) * 100;
+  el.style.background =
+    `linear-gradient(to right, var(--accent) 0%, var(--accent) ${p}%, var(--track-off) ${p}%, var(--track-off) 100%)`;
+}
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme === 1 ? "light" : theme === 2 ? "dark" : "";
+}
+
+function renderAll() {
+  $("#autostart").checked = state.autostart;
+  $("#launchWin").checked = !!state.launchAtStartup;
+
+  const el = $("#sCushion");
+  el.min = state.cushionMsMin ?? 50;
+  el.max = state.cushionMsMax ?? 800;
+  el.value = state.cushionMs ?? 300;
+  paintRange(el);
+  $("#vCushion").textContent = (state.cushionMs ?? 300) + " ms";
+
+  const capturing = state.capturingHotkey || "";
+  const listening = "Ctrl/Alt/Maj/Win + une touche… (Échap pour annuler)";
+  $("#hkToggleBtn").textContent = capturing === "toggle" ? listening : (state.toggleHotkey || "Ctrl+Alt+G");
+  $("#hkSwitcherBtn").textContent = capturing === "switcher" ? listening : (state.switcherHotkey || "Ctrl+Alt+S");
+
+  $("#themeSelect").value = String(state.theme ?? 0);
+}
+
+$("#autostart").addEventListener("change", () => {
+  state.autostart = $("#autostart").checked;
+  post("autostart|" + (state.autostart ? 1 : 0));
+});
+$("#launchWin").addEventListener("change", () => {
+  state.launchAtStartup = $("#launchWin").checked;
+  post("launchwindows|" + (state.launchAtStartup ? 1 : 0));
+});
+
+$("#sCushion").addEventListener("input", () => {
+  const el = $("#sCushion");
+  state.cushionMs = +el.value;
+  paintRange(el);
+  $("#vCushion").textContent = state.cushionMs + " ms";
+  post("cushion|" + state.cushionMs);
+});
+$("#sCushion").addEventListener("change", () => post("cushioncommit"));
+
+// The actual key combo is captured natively (a low-level keyboard hook on
+// the C++ side, see StartHotkeyCapture/HotkeyCaptureHookProc) instead of a
+// page-level keydown listener: WebView2/Chromium reserves many Ctrl(+Shift)
+// +<letter> and F-key combos as its own browser accelerators and never
+// delivers those to the page's JS. This side just tells the native side
+// when to start/stop listening and reflects state.capturingHotkey.
+$("#hkToggleBtn").addEventListener("click", () => post("capturehotkey|toggle"));
+$("#hkSwitcherBtn").addEventListener("click", () => post("capturehotkey|switcher"));
+
+$("#themeSelect").addEventListener("change", () => {
+  state.theme = +$("#themeSelect").value;
+  post("theme|" + state.theme);
+});
+
+$("#exportBtn").addEventListener("click", () => post("exportconfig"));
+$("#importBtn").addEventListener("click", () => post("importconfig"));
+$("#resetBtn").addEventListener("click", () => post("resetoptions"));
+
+window.addEventListener("keydown", ev => {
+  if (ev.key === "Escape") post("cancelhotkeycapture");
+});
+
+let toastTimer = 0;
+function toast(msg, kind) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.classList.toggle("ok", kind === "ok");
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 6000);
+}
+
+if (bridge) {
+  bridge.addEventListener("message", ev => {
+    const m = ev.data;
+    if (!m || !m.type) return;
+    if (m.type === "state") {
+      state = m;
+      applyTheme(m.theme);
+      renderAll();
+    } else if (m.type === "error") {
+      toast(m.message);
+    } else if (m.type === "info") {
+      toast(m.message, "ok");
+    }
+  });
+  post("ready");
+}
+</script>
+</body>
+</html>

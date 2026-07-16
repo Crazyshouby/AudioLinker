@@ -1,0 +1,20 @@
+# Build output
+build/
+
+# Local Claude Code settings
+.claude/
+
+# WebView2 NuGet package: only the pieces the build actually uses are
+# committed (headers + x64 static loader + license). Everything else in the
+# package (managed assemblies, other architectures, tooling) is ignored.
+third_party/webview2/*
+!third_party/webview2/LICENSE.txt
+!third_party/webview2/NOTICE.txt
+!third_party/webview2/build/
+third_party/webview2/build/*
+!third_party/webview2/build/native/
+third_party/webview2/build/native/*
+!third_party/webview2/build/native/include/
+!third_party/webview2/build/native/x64/
+third_party/webview2/build/native/x64/*
+!third_party/webview2/build/native/x64/WebView2LoaderStatic.lib
