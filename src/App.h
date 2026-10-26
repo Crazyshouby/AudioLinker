@@ -91,6 +91,11 @@ constexpr UINT_PTR IDT_STOP_POLL = 8;
 // really ready to open.
 constexpr UINT_PTR IDT_AUTOMATION = 9;
 constexpr int kAutomationDelayMs = 1500;
+// Level meters (VU bars, spectrum): faster than the status timer so the
+// bars move instead of stepping, with a message that carries nothing else.
+constexpr UINT_PTR IDT_VU_TIMER = 10;
+constexpr int kVuIntervalMs = 100;
+constexpr int kStatusIntervalMs = 250;
 constexpr UINT WM_TRAYICON = WM_APP + 1;
 constexpr UINT WM_DEVICES_CHANGED = WM_APP + 2;
 // Windows' default render endpoint changed (see DeviceNotificationClient).
@@ -140,6 +145,10 @@ extern int& g_masterVolumePercent;
 extern std::wstring& g_setupMicId;
 extern bool g_micMetering;
 extern bool g_statusTimerForGroup;
+// Whole-group mute (header button): applied on top of every output's own
+// mute, never persisted -- a quick "shut up" that survives neither a
+// restart of the app nor a setup change.
+extern bool g_groupMuted;
 extern int& g_baseCushionMs;
 extern int& g_deviceFillMs;
 extern bool& g_lowLatency;
@@ -201,6 +210,13 @@ extern std::wstring g_pendingAutoSetup;
 void FlushConfig();
 void SaveConfig();
 int EffectiveVolume(const OutputSettings& s);
+// Starts/stops the status and VU timers according to who needs them (a
+// playing group, the INPUTS tab's mic metering). Call after changing
+// g_statusTimerForGroup or g_micMetering.
+void UpdateMeterTimers();
+// What the engine should actually mute for this output: its own flag or
+// the whole-group mute.
+bool EffectiveMuted(const OutputSettings& s);
 void OnCreateGroup(HWND hwnd);
 void OnStop(HWND hwnd);
 void ToggleGroup(HWND hwnd);
@@ -260,7 +276,11 @@ void PostJson(const json& j);
 void SendState();
 void SendSources();
 void SendStatus();
+void SendPeaks();
 void SendCalStatus();
+// Persistent notice under the main page's header; empty message = clear.
+void SendBanner(const std::wstring& message, const std::wstring& actionCmd = L"",
+                const std::wstring& actionLabel = L"");
 void SendError(const std::wstring& message);
 void SendInfo(const std::wstring& message);
 void SendErrorWithAction(const std::wstring& message, const std::wstring& command,
@@ -287,5 +307,8 @@ void AddTrayIcon(HWND hwnd);
 void ShowTrayBalloon(const std::wstring& text, DWORD iconFlag);
 void ShowTrayMenu(HWND hwnd);
 void RestoreFromTray(HWND hwnd);
+// Icon variant (plain / "group active" dot) and tooltip follow the engine
+// state; cheap to call often, only talks to the shell on a change.
+void UpdateTrayState();
 
 } // namespace al

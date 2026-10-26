@@ -163,6 +163,8 @@ public:
     void resyncAllOutputs();
     // Counters and flags, non-destructive (see OutputStatus).
     std::vector<OutputStatus> getStatus();
+    // Zeroes the underrun/drift counters of one output (empty id = all).
+    void resetCounters(const std::wstring& outputId);
     // Level meters since the previous call (destructive read, one consumer).
     std::vector<OutputPeaks> takePeaks();
     // The 10-band spectrum costs ten biquad passes over a copy of every

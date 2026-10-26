@@ -122,6 +122,7 @@ bool g_micMetering = false;
 // engine stopped unexpectedly" (WM_TIMER must call OnStop) from "the timer
 // only runs for mic metering" (idle engine is normal).
 bool g_statusTimerForGroup = false;
+bool g_groupMuted = false;
 // Mirrors AudioEngine's base ring-buffer cushion (kDefaultBaseCushionMs) so
 // it can be edited from the UI and persisted -- see the "cushion"/
 // "cushioncommit" web commands.

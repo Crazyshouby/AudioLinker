@@ -167,16 +167,16 @@ void StartMicMetering() {
     }
     g_micMetering = true;
     g_engine.startMicMetering(ids);
-    // The status timer normally only runs with the group; metering needs its
-    // ticks too (SendStatus carries the mic peaks).
-    SetTimer(g_mainWnd, IDT_STATUS_TIMER, 250, nullptr);
+    // The meter timers normally only run with the group; metering needs
+    // them too (SendPeaks carries the mic peaks).
+    UpdateMeterTimers();
 }
 
 void StopMicMetering() {
     if (!g_micMetering) return;
     g_micMetering = false;
     g_engine.stopMicMetering();
-    if (!g_statusTimerForGroup && g_mainWnd) KillTimer(g_mainWnd, IDT_STATUS_TIMER);
+    UpdateMeterTimers();
 }
 
 // --- Audio source apps (process-loopback candidates) ---

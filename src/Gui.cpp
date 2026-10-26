@@ -331,6 +331,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 if (d.id == current && IsCableDevice(d.name)) return 0; // still ours
             }
             LOG_WARN(L"La sortie par défaut a été changée hors d'AudioLinker pendant le groupe.");
+            SendBanner(L"Le son a quitté le groupe : Windows a changé de sortie par défaut.",
+                       L"reclaim", L"Reprendre");
             SendErrorWithAction(L"Le son a quitté le groupe : Windows a changé de sortie par défaut.",
                                 L"reclaim", L"Reprendre");
             return 0;
@@ -397,6 +399,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             if (wParam == IDT_SAVE) {
                 FlushConfig(); // kills the timer itself
+                return 0;
+            }
+            if (wParam == IDT_VU_TIMER) {
+                if (!g_engine.isStarting()) SendPeaks();
                 return 0;
             }
             if (wParam == IDT_STOP_POLL) {
@@ -478,7 +484,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     if (g_engine.takeStartError(error)) {
                         LOG_ERROR(L"Échec du démarrage du groupe : " + error);
                         g_statusTimerForGroup = false;
-                        if (!g_micMetering) KillTimer(hwnd, IDT_STATUS_TIMER);
+                        UpdateMeterTimers();
                         g_playingSetup.clear();
                         RestoreDefaultAndUnroute();
                         SendState();

@@ -503,6 +503,15 @@ std::vector<OutputStatus> AudioEngine::getStatus() {
     return result;
 }
 
+void AudioEngine::resetCounters(const std::wstring& outputId) {
+    std::lock_guard<std::mutex> lock(outputsMutex_);
+    for (auto& state : outputs_) {
+        if (!outputId.empty() && state->deviceId != outputId) continue;
+        state->underruns = 0;
+        state->driftCorrections = 0;
+    }
+}
+
 std::vector<OutputPeaks> AudioEngine::takePeaks() {
     std::vector<OutputPeaks> result;
     std::lock_guard<std::mutex> lock(outputsMutex_);

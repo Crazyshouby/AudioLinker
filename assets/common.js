@@ -39,23 +39,39 @@ function paintRange(el) {
     `linear-gradient(to right, var(--accent) 0%, var(--accent) ${p}%, var(--track-off) ${p}%, var(--track-off) 100%)`;
 }
 
-// Transient message at the bottom of the window. kind "ok" = green info
-// instead of red error. action: optional {cmd, label} -- a button inside
-// the toast that posts `cmd` back to the native side (e.g. "Reprendre" when
-// the default output was changed behind the group's back).
-let toastTimer = 0;
+// Transient messages stacked at the bottom of the window (#toasts): up to
+// three at once, each gone after a few seconds or on click, so two messages
+// arriving together ("source closed", then an error) no longer overwrite
+// each other. kind "ok" = green info instead of red error. action:
+// optional {cmd, label} -- a button inside the toast that posts `cmd` back
+// to the native side (e.g. "Reprendre" when the default output was changed
+// behind the group's back); such a toast stays longer.
+const TOAST_MAX = 3;
 function toast(msg, kind, action) {
-  const t = $("#toast");
-  t.textContent = msg;
+  const box = $("#toasts");
+  if (!box) return;
+  const t = document.createElement("div");
+  t.className = "toast" + (kind === "ok" ? " ok" : "");
+  const text = document.createElement("span");
+  text.className = "toast-text";
+  text.textContent = msg;
+  t.appendChild(text);
   if (action) {
     const btn = document.createElement("button");
     btn.className = "ghost-btn toast-action";
     btn.textContent = action.label;
-    btn.addEventListener("click", () => { post(action.cmd); t.classList.remove("show"); });
+    btn.addEventListener("click", ev => { ev.stopPropagation(); post(action.cmd); dismiss(); });
     t.appendChild(btn);
   }
-  t.classList.toggle("ok", kind === "ok");
-  t.classList.add("show");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove("show"), action ? 15000 : 6000);
+  let timer = 0;
+  const dismiss = () => {
+    clearTimeout(timer);
+    t.classList.remove("show");
+    setTimeout(() => t.remove(), 250);
+  };
+  t.addEventListener("click", dismiss);
+  while (box.children.length >= TOAST_MAX) box.firstChild.remove();
+  box.appendChild(t);
+  requestAnimationFrame(() => t.classList.add("show"));
+  timer = setTimeout(dismiss, action ? 15000 : 5000);
 }

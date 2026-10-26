@@ -47,12 +47,23 @@ header { display: flex; align-items: center; gap: 14px; flex: none; }
 @keyframes rot { to { transform: rotate(360deg); } }
 #toggleBtn.starting .spin { display: inline-block; }
 
+/* Persistent notice under the header (source lost, audio left the group...)
+   -- unlike a toast, it stays as long as the condition does. */
+#banner {
+  display: flex; align-items: center; gap: 12px; flex: none;
+  background: rgba(232, 163, 61, 0.12); border: 1px solid rgba(232, 163, 61, 0.45);
+  color: var(--text); border-radius: 10px; padding: 8px 14px; font-size: 13px;
+}
+#banner[hidden] { display: none; }
+#banner .banner-text { flex: 1; min-width: 0; }
+#banner .ghost-btn { flex: none; }
+
 /* ---------- Cards ---------- */
-/* Two-column landscape layout: settings/setups/options stacked on the left,
-   the (growable) speaker list taking all remaining width on the right. */
+/* Two-column landscape layout: setups on the left, the (growable) speaker
+   list -- with the selected speaker's sheet opened in place -- on the right. */
 main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
 #colLeft {
-  width: 400px; flex: none; display: flex; flex-direction: column; gap: 14px;
+  width: 340px; flex: none; display: flex; flex-direction: column; gap: 14px;
   min-height: 0; overflow-y: auto; padding-right: 2px;
 }
 #colLeft::-webkit-scrollbar { width: 8px; }
@@ -106,10 +117,12 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
 .device {
   display: flex; align-items: center; gap: 12px; padding: 9px 10px; border-radius: 10px;
   border: 1px solid transparent; cursor: pointer; transition: background 0.12s, border-color 0.12s;
-  margin-bottom: 2px;
+  margin-bottom: 2px; outline: none;
 }
 .device:hover { background: var(--card-2); }
+.device:focus-visible { border-color: var(--accent); }
 .device.sel { background: rgba(var(--dev-color-rgb, var(--accent-rgb)), 0.10); border-color: rgba(var(--dev-color-rgb, var(--accent-rgb)), 0.35); }
+.device.sel.open { border-bottom-left-radius: 0; border-bottom-right-radius: 0; margin-bottom: 0; border-bottom-color: transparent; }
 .device.dragging { opacity: 0.4; }
 
 .grip {
@@ -147,9 +160,18 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
 }
 .name-edit::placeholder { color: var(--faint); }
 
-/* ---------- Per-speaker context menu (identify / mute / color) ---------- */
+/* Hover-only "identify" button on each speaker row (also in the menu). */
+.dev-id-btn {
+  flex: none; width: 26px; height: 26px; border-radius: 7px; border: 1px solid transparent;
+  background: transparent; color: var(--faint); cursor: pointer; display: grid; place-items: center;
+  opacity: 0; transition: opacity 0.12s, color 0.12s, border-color 0.12s;
+}
+.device:hover .dev-id-btn, .device:focus-within .dev-id-btn { opacity: 1; }
+.dev-id-btn:hover { color: var(--text); border-color: var(--border); }
+
+/* ---------- Per-speaker context menu (identify / mute / color / automation) ---------- */
 #ctxMenu {
-  position: fixed; z-index: 20; min-width: 220px; max-width: 320px; display: none;
+  position: fixed; z-index: 20; min-width: 240px; max-width: 340px; display: none;
   background: var(--card-2); border: 1px solid var(--border); border-radius: 10px;
   padding: 6px; box-shadow: 0 14px 44px rgba(0, 0, 0, 0.55);
 }
@@ -183,13 +205,15 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
   background: var(--faint); transform: rotate(-45deg);
 }
 
-.dev-meta { display: flex; gap: 6px; margin-top: 3px; }
+.dev-meta { display: flex; gap: 6px; margin-top: 3px; flex-wrap: wrap; }
 .badge {
   font-size: 10.5px; color: var(--muted); background: var(--card-2);
   border: 1px solid var(--border-soft); border-radius: 5px; padding: 1px 7px;
 }
 .badge.glitch { color: var(--warn); border-color: rgba(232, 163, 61, 0.4); }
+.badge.lost { color: var(--red); border-color: rgba(239, 111, 111, 0.4); }
 .badge.src { color: var(--accent-2); border-color: rgba(var(--accent-rgb), 0.4); }
+.badge.lag { color: var(--faint); }
 
 .dev-right { flex: none; display: flex; align-items: center; gap: 10px; width: 120px; }
 .dev-right.wide { width: auto; } /* inputs rows: slider + value + mute + VU */
@@ -199,7 +223,7 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
 .vu-fill {
   height: 100%; width: 0%; border-radius: 3px;
   background: linear-gradient(90deg, var(--accent), var(--accent-2));
-  transition: width 0.12s linear;
+  transition: width 0.08s linear;
 }
 .vu-fill.hot { background: linear-gradient(90deg, var(--warn), var(--red)); }
 
@@ -210,8 +234,9 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
   display: grid; place-items: center; transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 .icon-btn:hover { color: var(--text); border-color: var(--accent); background: rgba(var(--accent-rgb), 0.08); }
+.icon-btn.on { color: var(--red); border-color: rgba(239, 111, 111, 0.5); background: rgba(239, 111, 111, 0.1); }
 
-/* ---------- Modals (per-speaker settings, options) ---------- */
+/* ---------- Modals ---------- */
 .modal {
   position: fixed; inset: 0; z-index: 15; display: grid; place-items: center;
   background: rgba(6, 7, 10, 0.6); backdrop-filter: blur(6px);
@@ -258,14 +283,19 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
 .seg button:hover { color: var(--text); }
 .seg button.on { background: var(--accent); color: #fff; box-shadow: 0 2px 8px var(--accent-glow); }
 
-/* ---------- EQ card ---------- */
-#eqCard { flex: none; }
-#eqDeviceName { font-size: 13.5px; font-weight: 600; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* ---------- Speaker sheet (opens in place, under the selected row) ---------- */
+#sheet {
+  margin: 0 0 8px; padding: 12px 14px 14px;
+  background: rgba(var(--dev-color-rgb, var(--accent-rgb)), 0.06);
+  border: 1px solid rgba(var(--dev-color-rgb, var(--accent-rgb)), 0.35); border-top: 0;
+  border-radius: 0 0 10px 10px; cursor: default;
+}
+#sheet[hidden] { display: none; }
 #eqCurveWrap { position: relative; height: 130px; }
-/* Live 5-band spectrum behind the curve, from AudioEngine's real per-band
+/* Live 10-band spectrum behind the curve, from AudioEngine's real per-band
    meter (see the JS comment above startEqFlow()) -- kept low-contrast so it
    sits strictly behind the curve/points instead of competing with them. */
-#eqFlow { position: absolute; inset: 0; width: 100%; height: 130px; display: block; pointer-events: none; }
+#eqFlow { position: absolute; inset: 0; height: 130px; display: block; pointer-events: none; }
 #eqCurve { position: absolute; inset: 0; display: block; touch-action: none; }
 .eq-zero-line { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 3; }
 .eq-fill { fill: var(--accent); opacity: 0.14; }
@@ -274,7 +304,9 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
 .eq-point:hover, .eq-point.dragging { stroke: var(--accent-2); }
 .eq-freq-label { fill: var(--faint); font-size: 10px; text-anchor: middle; }
 .eq-db-value { fill: var(--text); font-size: 10.5px; text-anchor: middle; font-variant-numeric: tabular-nums; }
-#eqControls { display: grid; gap: 12px; margin-top: 10px; }
+#eqControls { display: grid; gap: 12px; margin-top: 10px; grid-template-columns: 1fr 1fr; }
+#eqControls .row.wide { grid-column: 1 / -1; }
+.sheet-hint { font-size: 11.5px; color: var(--faint); margin-top: 2px; }
 
 /* ---------- Setups ---------- */
 #setupsCard { flex: 1; min-height: 150px; display: flex; flex-direction: column; }
@@ -284,9 +316,10 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
 .setup {
   display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px;
   border: 1px solid transparent; cursor: pointer; transition: background 0.12s, border-color 0.12s;
-  margin-bottom: 2px;
+  margin-bottom: 2px; outline: none;
 }
 .setup:hover { background: var(--card-2); }
+.setup:focus-visible { border-color: var(--accent); }
 .setup.on { background: rgba(var(--accent-rgb), 0.10); border-color: rgba(var(--accent-rgb), 0.35); }
 .setup-play {
   flex: none; border: 0; border-radius: 50%; cursor: pointer; display: grid; place-items: center;
@@ -301,14 +334,21 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
   font-size: 12px; transition: all 0.15s;
 }
 .setup.on .setup-ico { background: var(--accent); border-color: var(--accent); color: #fff; }
-.setup-name { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.setup-count { font-size: 11px; color: var(--faint); flex: none; }
+.setup-main { flex: 1; min-width: 0; }
+.setup-name { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.setup-sub { display: flex; gap: 6px; align-items: center; margin-top: 2px; font-size: 11px; color: var(--faint); }
+.badge.playing { color: var(--green); border-color: rgba(61, 220, 132, 0.4); }
+.badge.modified { color: var(--warn); border-color: rgba(232, 163, 61, 0.4); }
+.badge.selected { color: var(--accent-2); border-color: rgba(var(--accent-rgb), 0.4); }
+.setup-save {
+  flex: none; padding: 4px 8px; font-size: 11.5px; color: var(--warn); border-color: rgba(232, 163, 61, 0.45);
+}
 .setup-del {
   flex: none; border: 0; background: transparent; color: var(--faint); border-radius: 6px;
   width: 24px; height: 24px; cursor: pointer; font-size: 13px; line-height: 1;
   opacity: 0; transition: opacity 0.12s, color 0.12s, background 0.12s;
 }
-.setup:hover .setup-del { opacity: 1; }
+.setup:hover .setup-del, .setup:focus-within .setup-del { opacity: 1; }
 .setup-del:hover { color: var(--red); background: rgba(239, 111, 111, 0.12); }
 .setup-form { display: flex; gap: 10px; margin-top: 10px; flex: none; }
 
@@ -330,7 +370,7 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
 .cal-row.failed .cal-status { color: var(--red); }
 #calResults { margin-bottom: 4px; }
 
-/* ---------- Footer / toast ---------- */
+/* ---------- Footer ---------- */
 footer { flex: none; text-align: center; color: var(--faint); font-size: 11.5px; padding: 2px 0 4px; }
 footer kbd {
   background: var(--card-2); border: 1px solid var(--border); border-radius: 4px;
@@ -350,6 +390,13 @@ footer kbd {
       <h1>AudioLinker</h1>
       <div class="status" id="statusPill"><span class="dot"></span><span id="statusText">Groupe arrêté</span></div>
     </div>
+    <button class="icon-btn" id="muteBtn" title="Couper le son de tout le groupe (sans toucher aux réglages)">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+        <path id="muteWaves" d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9.5 9.5 0 0 1 0 14"/>
+        <path id="muteCross" d="M22 9l-6 6M16 9l6 6" style="display:none"/>
+      </svg>
+    </button>
     <button class="icon-btn" id="optionsBtn" title="Options">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="3.2"/>
@@ -358,6 +405,8 @@ footer kbd {
     </button>
     <button id="toggleBtn"><span class="spin"></span><span id="toggleLabel">Démarrer le groupe</span></button>
   </header>
+
+  <div id="banner" hidden><span class="banner-text" id="bannerText"></span><button class="ghost-btn" id="bannerBtn" hidden></button></div>
 
   <main>
     <div id="colLeft">
@@ -370,54 +419,14 @@ footer kbd {
         <button class="ghost-btn" id="saveSetupBtn">Enregistrer l'actuel</button>
       </div>
     </section>
-
-    <section class="card" id="eqCard">
-      <div class="card-head">
-        <h2>Égaliseur</h2>
-      </div>
-      <div id="eqEmpty" class="empty" style="padding:20px 0">Sélectionnez une enceinte pour régler sa source, son égaliseur et sa latence.</div>
-      <div id="eqBody" style="display:none">
-        <div id="eqDeviceName"></div>
-        <div id="eqCurveWrap">
-          <canvas id="eqFlow" width="340" height="130"></canvas>
-          <svg id="eqCurve" viewBox="0 0 340 130" width="100%" height="130"></svg>
-        </div>
-        <div id="eqControls">
-          <div class="row" id="sourceRow">
-            <label>Source</label>
-            <select class="text-input" id="eqSourceSelect"></select>
-          </div>
-          <div class="row" id="channelRow">
-            <label>Canal</label>
-            <div class="seg" id="channelSeg">
-              <button data-mode="0">Stéréo</button>
-              <button data-mode="1">Gauche</button>
-              <button data-mode="2">Droite</button>
-            </div>
-          </div>
-          <div class="row"><label>Volume</label><input type="range" id="sVol" min="0" max="100" step="1"><span class="val" id="vVol"></span></div>
-          <div class="row" id="latRow"><label>Latence</label><input type="range" id="sLat" min="0" max="500" step="1"><span class="val" id="vLat"></span></div>
-        </div>
-      </div>
-    </section>
-
     </div>
 
     <section class="card" id="devicesCard">
       <div class="card-head">
-        <h2 id="devicesCardTitle">Enceintes du groupe</h2>
-        <div style="display:flex;gap:8px;align-items:center">
-          <div class="seg-tabs" id="devTabs">
-            <button class="seg-tab active" data-tab="outputs">Sorties</button>
-            <button class="seg-tab" data-tab="inputs">Entrées</button>
-          </div>
-          <button class="ghost-btn" id="updateSetupBtn" style="display:none;padding:5px 9px">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
-              <path d="M17 21v-8H7v8"/>
-              <path d="M7 3v5h8"/>
-            </svg>
-          </button>
+        <h2>Enceintes</h2>
+        <div class="seg-tabs" id="devTabs">
+          <button class="seg-tab active" data-tab="outputs">Sorties</button>
+          <button class="seg-tab" data-tab="inputs">Entrées</button>
         </div>
       </div>
       <div id="deviceList"></div>
@@ -449,6 +458,32 @@ footer kbd {
 
   <footer id="footerHint"></footer>
 </div>
+
+<!-- The selected speaker's sheet: one element, moved under the selected row. -->
+<div id="sheet" hidden>
+  <div id="eqCurveWrap">
+    <canvas id="eqFlow" width="340" height="130"></canvas>
+    <svg id="eqCurve" viewBox="0 0 340 130" width="100%" height="130"></svg>
+  </div>
+  <div id="eqControls">
+    <div class="row wide" id="sourceRow">
+      <label>Source</label>
+      <select class="text-input" id="eqSourceSelect"></select>
+    </div>
+    <div class="row" id="channelRow">
+      <label>Canal</label>
+      <div class="seg" id="channelSeg">
+        <button data-mode="0">Stéréo</button>
+        <button data-mode="1">Gauche</button>
+        <button data-mode="2">Droite</button>
+      </div>
+    </div>
+    <div class="row"><label>Volume</label><input type="range" id="sVol" min="0" max="100" step="1"><span class="val" id="vVol"></span></div>
+    <div class="row wide" id="latRow"><label>Latence</label><input type="range" id="sLat" min="0" max="500" step="1"><span class="val" id="vLat"></span></div>
+  </div>
+  <div class="sheet-hint">Double-clic sur un point de l'égaliseur : remise à 0 dB. Clic sur la ligne de l'enceinte : refermer.</div>
+</div>
+
 <div class="modal" id="confirmModal">
   <div class="modal-panel" style="width:380px">
     <div class="modal-head">
@@ -487,27 +522,32 @@ footer kbd {
 </div>
 
 <div id="ctxMenu"></div>
-<div id="toast"></div>
+<div id="toasts"></div>
 
 <script>
 "use strict";
 /*@common.js@*/
 
-let state = { running: false, starting: false, masterVolume: 100,
+let state = { running: false, starting: false, masterVolume: 100, groupMuted: false,
               toggleHotkey: "Ctrl+Alt+G", switcherHotkey: "Ctrl+Alt+S",
               devices: [], setups: [], activeSetup: "", editingSetup: "", playingSetup: "",
-              inputs: [], setupMic: "" };
+              inputs: [], setupMic: "", automation: {} };
 let selectedId = null;
-const rowRefs = new Map(); // deviceId -> {row, vu, glitch, badges:{channel,vol,lat}}
+const rowRefs = new Map(); // deviceId -> {row, fill, glitch, lag, badges:{ch,vol,lat,src}}
 
 const CHANNEL_NAMES = ["Stéréo", "Gauche", "Droite"];
 const displayName = d => d.alias || d.name;
 // "ef6f6f" -> "239, 111, 111", for CSS custom properties consumed via rgba().
 const hexToRgbTriplet = hex =>
   [hex.slice(0, 2), hex.slice(2, 4), hex.slice(4, 6)].map(h => parseInt(h, 16)).join(", ");
+const plural = (n, word) => `${n} ${word}${n > 1 ? "s" : ""}`;
 
 const SVG_PLAY = '<svg width="16" height="16" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>';
 const SVG_STOP = '<svg width="16" height="16" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>';
+const SVG_SAVE = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px">' +
+  '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>';
+const SVG_BELL = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>';
 
 // Physical device type badge (see AudioDeviceKind in DeviceManager.h) --
 // same stroke style across the set so an unrecognized/new kind falling back
@@ -529,6 +569,18 @@ const KIND_LABELS = {
   digital: "Numérique (S/PDIF)", bluetooth: "Bluetooth",
 };
 
+// Keyboard: a row behaves like a button (Enter = click) and Space toggles
+// its checkbox, so the whole list is usable without a mouse.
+function makeRowKeyboardable(row, onEnter, onSpace) {
+  row.tabIndex = 0;
+  row.setAttribute("role", "button");
+  row.addEventListener("keydown", ev => {
+    if (ev.target !== row) return; // typing inside the sheet/alias editor
+    if (ev.key === "Enter") { ev.preventDefault(); onEnter(); }
+    else if (ev.key === " " && onSpace) { ev.preventDefault(); onSpace(); }
+  });
+}
+
 // ---------- Drag & drop reordering ----------
 
 let dragEl = null;
@@ -547,6 +599,7 @@ function commitOrder() {
   const ids = [...document.querySelectorAll("#deviceList .device")].map(r => r.dataset.id);
   state.devices.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
   post("reorder|" + ids.join("|"));
+  placeSheet(); // the sheet must follow its row
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -579,7 +632,9 @@ function renderHeader() {
   if (state.starting) { txt.textContent = "Démarrage du groupe…"; lbl.textContent = "Démarrage…"; }
   else if (state.running) {
     const n = state.devices.filter(d => d.checked).length;
-    txt.textContent = `Groupe actif — ${n} enceinte${n > 1 ? "s" : ""}`;
+    txt.textContent = `Groupe actif — ${plural(n, "enceinte")}` +
+                      (state.playingSetup ? ` · ${state.playingSetup}` : "") +
+                      (state.groupMuted ? " · son coupé" : "");
     lbl.textContent = "Arrêter le groupe";
   } else { txt.textContent = "Groupe arrêté"; lbl.textContent = "Démarrer le groupe"; }
   $("#refreshBtn").disabled = state.starting;
@@ -587,7 +642,11 @@ function renderHeader() {
   // Mic calibration works group stopped OR running (it stops/restarts it
   // itself) -- only a start already in flight blocks it.
   $("#micCalBtn").disabled = state.starting;
-  $("#devicesCardTitle").textContent = state.editingSetup || "Enceintes du groupe";
+  const mute = $("#muteBtn");
+  mute.classList.toggle("on", !!state.groupMuted);
+  mute.title = state.groupMuted ? "Rétablir le son du groupe" : "Couper le son de tout le groupe (sans toucher aux réglages)";
+  $("#muteWaves").style.display = state.groupMuted ? "none" : "";
+  $("#muteCross").style.display = state.groupMuted ? "" : "none";
   // Group stopped: the default device is restored, ticks would blast the
   // normal output instead of the group.
   if (!state.running && typeof calTimer !== "undefined" && calTimer) setCalibration(false);
@@ -595,7 +654,7 @@ function renderHeader() {
 
 function renderList() {
   const list = $("#deviceList");
-  list.textContent = "";
+  list.textContent = ""; // detaches the sheet too; placeSheet() puts it back
   rowRefs.clear();
   if (!state.devices.length) {
     const e = document.createElement("div");
@@ -606,7 +665,7 @@ function renderList() {
   }
   for (const d of state.devices) {
     const row = document.createElement("div");
-    row.className = "device" + (d.id === selectedId ? " sel" : "");
+    row.className = "device" + (d.id === selectedId ? " sel open" : "");
     row.dataset.id = d.id;
     // Custom per-speaker color (set via the right-click menu): drives the
     // checked checkbox fill and the selection highlight, both via CSS
@@ -641,6 +700,7 @@ function renderList() {
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.checked = d.checked;
+    cb.tabIndex = -1;
     cb.addEventListener("click", ev => ev.stopPropagation());
     cb.addEventListener("change", () => {
       d.checked = cb.checked;
@@ -676,11 +736,19 @@ function renderList() {
     const bVol = document.createElement("span"); bVol.className = "badge";
     const bLat = document.createElement("span"); bLat.className = "badge";
     const bSrc = document.createElement("span"); bSrc.className = "badge src"; bSrc.hidden = true;
-    bSrc.title = "Source de cette enceinte (réglable dans le panneau Égaliseur)";
+    bSrc.title = "Source de cette enceinte (réglable dans sa fiche)";
+    const bLag = document.createElement("span"); bLag.className = "badge lag"; bLag.hidden = true;
+    bLag.title = "Retard mesuré entre l'envoi et la lecture par le périphérique (tampon Windows + pilote/Bluetooth)";
     const bGl = document.createElement("span"); bGl.className = "badge glitch"; bGl.hidden = true;
-    bGl.title = "Sous-alimentations du tampon / corrections de dérive depuis le démarrage";
-    meta.append(bCh, bVol, bLat, bSrc, bGl);
+    meta.append(bCh, bVol, bLat, bSrc, bLag, bGl);
     main.append(nameRow, meta);
+
+    const idBtn = document.createElement("button");
+    idBtn.className = "dev-id-btn";
+    idBtn.innerHTML = SVG_BELL;
+    idBtn.title = "Identifier : deux bips sur cette enceinte";
+    idBtn.tabIndex = -1;
+    idBtn.addEventListener("click", ev => { ev.stopPropagation(); post(`identify|${d.id}`); });
 
     const right = document.createElement("div");
     right.className = "dev-right";
@@ -691,18 +759,20 @@ function renderList() {
     vu.appendChild(fill);
     right.append(dot, vu);
 
-    row.append(grip, chk, main, right);
-    row.addEventListener("click", () => selectDevice(d.id));
+    row.append(grip, chk, main, idBtn, right);
+    row.addEventListener("click", () => selectDevice(d.id === selectedId ? null : d.id));
     row.addEventListener("contextmenu", ev => {
       ev.preventDefault();
-      selectDevice(d.id);
+      if (selectedId !== d.id) selectDevice(d.id);
       openDeviceMenu(d, ev.clientX, ev.clientY);
     });
+    makeRowKeyboardable(row, () => selectDevice(d.id === selectedId ? null : d.id), () => cb.click());
     list.appendChild(row);
 
-    rowRefs.set(d.id, { row, fill, glitch: bGl, badges: { ch: bCh, vol: bVol, lat: bLat, src: bSrc } });
+    rowRefs.set(d.id, { row, fill, glitch: bGl, lag: bLag, badges: { ch: bCh, vol: bVol, lat: bLat, src: bSrc } });
     updateBadges(d);
   }
+  placeSheet();
 }
 
 // ---------- INPUTS tab (per-setup default microphone) ----------
@@ -753,16 +823,13 @@ function renderInputs() {
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.checked = inp.id === state.setupMic;
+    cb.tabIndex = -1;
     // Only the radio changes the Windows default mic (the backend confirms
     // via a state resend, so the input's own toggle is blocked): a click
     // anywhere else on the row -- to look at the VU, say -- must not switch
     // the mic of every app on the PC.
-    cb.addEventListener("click", ev => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      post(`setupmic|${inp.id}`);
-      markModified();
-    });
+    const pick = () => { post(`setupmic|${inp.id}`); markModified(); };
+    cb.addEventListener("click", ev => { ev.preventDefault(); ev.stopPropagation(); pick(); });
     const box = document.createElement("span");
     box.className = "box";
     chk.append(cb, box);
@@ -831,6 +898,7 @@ function renderInputs() {
 
     right.append(vol, val, mute, vu);
     row.append(chk, main, right);
+    makeRowKeyboardable(row, pick, pick);
     list.appendChild(row);
     inputRowRefs.set(inp.id, { row, fill });
     paintRange(vol);
@@ -853,7 +921,7 @@ function startAliasEdit(d, nameEl) {
     else if (ev.key === "Escape") { cancelled = true; input.blur(); }
   });
   input.addEventListener("blur", () => {
-    if (cancelled) { renderList(); renderEqCard(); return; }
+    if (cancelled) { renderList(); renderSheet(); return; }
     const alias = input.value.trim();
     d.alias = alias;
     post(`alias|${d.id}|${alias}`); // C++ persists and resends state (full re-render)
@@ -882,7 +950,7 @@ function closeAllModals() {
   for (const m of document.querySelectorAll(".modal.show")) m.classList.remove("show");
 }
 
-// The EQ card always edits the selected output's own live config -- setups
+// The sheet always edits the selected output's own live config -- setups
 // only ever store a snapshot of it (see ApplySetup/SaveSetupFromCurrent on
 // the C++ side), they don't have their own separately-editable EQ/volume.
 function currentEqTarget() {
@@ -909,30 +977,27 @@ function currentEqTarget() {
 // Real data, not a decorative fake: AudioEngine runs the selected output's
 // actual post-EQ signal through ten bandpass filters at the standard ISO
 // 10-band analyzer frequencies (finer-grained than the 5-band shaping EQ
-// itself -- see kSpectrumBandFreqs / OutputStatus::spectrumBands in
-// AudioEngine.cpp) and reports each band's peak amplitude every 250ms via
-// the "status" message (st.bands, in applyStatus() below), only every
-// 250ms. This tweens smoothly between each real sample instead of just
-// lerping toward it -- a lerp mostly settles well before the next real
-// sample arrives (converges ~90% of the way within ~150ms at a 0.15
-// factor), so it visibly holds still and then jumps, i.e. exactly the
-// choppiness being fixed here. Tweening from the previous real sample to
-// the new one, over the actual measured time between them, stays in motion
-// continuously and never invents values -- it only interpolates between
-// two genuine measurements.
+// itself -- see kSpectrumBandFreqs / OutputPeaks::spectrumBands) and
+// reports each band's peak amplitude with every "peaks" message (every
+// 100ms, see applyPeaks()). This tweens smoothly between each real sample
+// instead of just lerping toward it -- a lerp mostly settles well before
+// the next real sample arrives, so it visibly holds still and then jumps.
+// Tweening from the previous real sample to the new one, over the actual
+// measured time between them, stays in motion continuously and never
+// invents values -- it only interpolates between two genuine measurements.
 const EQ_FLOW_BAND_COUNT = 10;
 const zeroBands = () => new Array(EQ_FLOW_BAND_COUNT).fill(0);
 let eqFlowLevels = zeroBands();      // currently displayed (interpolated) values
 let eqFlowPrev = zeroBands();        // real sample the current tween started from
 let eqFlowNext = zeroBands();        // real sample the current tween is heading to
 let eqFlowTickTime = 0;              // performance.now() when eqFlowNext was received
-let eqFlowTickInterval = 250;        // measured time since the previous real sample
+let eqFlowTickInterval = 100;        // measured time since the previous real sample
 let eqFlowLastTickTime = 0;
 let eqFlowRunning = false;
 let eqFlowAccent = "124, 111, 239";
 
 function spectrumX(i, n) {
-  return EQ_PAD_X + i * (EQ_VB_W - 2 * EQ_PAD_X) / (n - 1);
+  return EQ_PAD_X + i * (eqVbW - 2 * EQ_PAD_X) / (n - 1);
 }
 
 // Linear amplitude (what AudioEngine reports) isn't a usable display scale
@@ -962,16 +1027,16 @@ function stopEqFlow() {
   eqFlowNext = zeroBands();
   eqFlowTickTime = eqFlowLastTickTime = 0;
   const ctx = $("#eqFlow").getContext("2d");
-  ctx.clearRect(0, 0, EQ_VB_W, EQ_VB_H);
+  ctx.clearRect(0, 0, eqVbW, EQ_VB_H);
 }
 
-// Called from applyStatus() whenever a fresh real sample arrives for the
+// Called from applyPeaks() whenever a fresh real sample arrives for the
 // selected device -- starts a new tween from whatever's on screen right now
 // (not from the old target) toward the new sample, over however long it's
 // actually been since the previous sample.
 function feedEqFlow(bands) {
   const now = performance.now();
-  eqFlowTickInterval = eqFlowLastTickTime ? Math.min(1000, Math.max(60, now - eqFlowLastTickTime)) : 250;
+  eqFlowTickInterval = eqFlowLastTickTime ? Math.min(1000, Math.max(40, now - eqFlowLastTickTime)) : 100;
   eqFlowLastTickTime = now;
   eqFlowPrev = eqFlowLevels.slice();
   eqFlowNext = bands;
@@ -980,18 +1045,23 @@ function feedEqFlow(bands) {
 
 function stepEqFlow() {
   if (!eqFlowRunning) return;
+  // Nothing on screen and nothing coming: don't burn frames on an idle
+  // group (the next real sample restarts the motion).
   const t = eqFlowTickTime ? Math.min(1, (performance.now() - eqFlowTickTime) / eqFlowTickInterval) : 1;
   const eased = t * t * (3 - 2 * t); // smoothstep: eases in/out instead of a linear (slightly robotic) tween
+  let any = false;
   for (let i = 0; i < eqFlowLevels.length; i++) {
     eqFlowLevels[i] = eqFlowPrev[i] + (eqFlowNext[i] - eqFlowPrev[i]) * eased;
+    if (eqFlowLevels[i] > 0.0005 || eqFlowNext[i] > 0.0005) any = true;
   }
   drawEqFlow(eqFlowLevels);
-  requestAnimationFrame(stepEqFlow);
+  if (any || t < 1) requestAnimationFrame(stepEqFlow);
+  else eqFlowRunning = false; // idle: startEqFlow() is cheap to call again
 }
 
 function drawEqFlow(levels) {
   const ctx = $("#eqFlow").getContext("2d");
-  ctx.clearRect(0, 0, EQ_VB_W, EQ_VB_H);
+  ctx.clearRect(0, 0, eqVbW, EQ_VB_H);
   const base = eqBottomY();
   const range = eqBottomY() - eqTopY();
   const pts = levels.map((v, i) => ({ x: spectrumX(i, levels.length), y: base - Math.min(1, Math.max(0, v)) * range }));
@@ -1005,14 +1075,60 @@ function drawEqFlow(levels) {
   ctx.stroke(new Path2D(smoothPathD(pts)));
 }
 
-function renderEqCard() {
+// ---------- Speaker sheet ----------
+
+// Moves the (single) sheet element right under the selected row, or parks
+// it hidden when nothing is selected. Called after any list rebuild.
+function placeSheet() {
+  const sheet = $("#sheet");
+  const r = selectedId ? rowRefs.get(selectedId) : null;
+  if (!r) {
+    sheet.hidden = true;
+    document.body.appendChild(sheet); // parked, out of the list
+    return;
+  }
+  const d = device(selectedId);
+  if (d && d.color) {
+    sheet.style.setProperty("--dev-color", "#" + d.color);
+    sheet.style.setProperty("--dev-color-rgb", hexToRgbTriplet(d.color));
+  } else {
+    sheet.style.removeProperty("--dev-color");
+    sheet.style.removeProperty("--dev-color-rgb");
+  }
+  r.row.after(sheet);
+  sheet.hidden = false;
+}
+// Clicks inside the sheet must not reach the row (which would close it).
+document.addEventListener("DOMContentLoaded", () => {
+  $("#sheet").addEventListener("click", ev => ev.stopPropagation());
+});
+
+// Sizes the curve and the spectrum canvas to the sheet's real width (the
+// SVG viewBox follows the pixel width so nothing is stretched) and to the
+// screen's pixel ratio (a 340px-attribute canvas stretched by CSS was blurry
+// on any scaled display).
+function sizeEqSurfaces() {
+  const wrap = $("#eqCurveWrap");
+  const w = Math.max(200, Math.round(wrap.clientWidth || 340));
+  eqVbW = w;
+  const svg = $("#eqCurve");
+  svg.setAttribute("viewBox", `0 0 ${w} ${EQ_VB_H}`);
+  svg.setAttribute("preserveAspectRatio", "none");
+  const canvas = $("#eqFlow");
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(EQ_VB_H * dpr);
+  canvas.style.width = w + "px";
+  canvas.getContext("2d").setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function renderSheet() {
   const live = device(selectedId);
-  $("#eqEmpty").style.display = live ? "none" : "";
-  $("#eqBody").style.display = live ? "" : "none";
+  placeSheet();
   if (!live) { stopEqFlow(); return; }
+  sizeEqSurfaces();
   startEqFlow();
   const t = currentEqTarget();
-  $("#eqDeviceName").textContent = displayName(live);
   populateSourceOptions(live);
   for (const b of $("#channelSeg").children) b.classList.toggle("on", +b.dataset.mode === live.channel);
   $("#sLat").value = live.latency;
@@ -1023,12 +1139,23 @@ function renderEqCard() {
   paintRange($("#sVol"));
   $("#vVol").textContent = t.volume + " %";
   renderEqCurveInto($("#eqCurve"), t, eqDrag);
+  drawEqFlow(eqFlowLevels);
 }
 
+let resizeTimer = 0;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if (device(selectedId)) renderSheet(); }, 80);
+});
+
+// null = close the sheet.
 function selectDevice(id) {
   selectedId = id;
-  for (const [did, r] of rowRefs) r.row.classList.toggle("sel", did === id);
-  renderEqCard();
+  for (const [did, r] of rowRefs) {
+    r.row.classList.toggle("sel", did === id);
+    r.row.classList.toggle("open", did === id);
+  }
+  renderSheet();
   announceSpectrumTarget();
   if (id) requestSources(); // the sheet's Source dropdown wants a fresh list
 }
@@ -1044,11 +1171,12 @@ function announceSpectrumTarget() {
 // ---------- EQ curve (5-band graphic EQ) ----------
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-const EQ_VB_W = 340, EQ_VB_H = 130;
+let eqVbW = 340; // follows the sheet's pixel width (see sizeEqSurfaces)
+const EQ_VB_H = 130;
 const EQ_PAD_X = 20, EQ_PAD_TOP = 12, EQ_PAD_BOTTOM = 14;
 const EQ_FREQ_LABELS = ["60", "250", "1k", "4k", "12k"];
 
-function eqX(i) { return EQ_PAD_X + i * (EQ_VB_W - 2 * EQ_PAD_X) / (EQ_FREQ_LABELS.length - 1); }
+function eqX(i) { return EQ_PAD_X + i * (eqVbW - 2 * EQ_PAD_X) / (EQ_FREQ_LABELS.length - 1); }
 function eqTopY() { return EQ_PAD_TOP; }
 function eqBottomY() { return EQ_VB_H - EQ_PAD_BOTTOM; }
 function eqMidY() { return (eqTopY() + eqBottomY()) / 2; }
@@ -1089,7 +1217,7 @@ function renderEqCurveInto(svg, target, drag) {
 
   const zero = document.createElementNS(SVG_NS, "line");
   zero.setAttribute("x1", EQ_PAD_X); zero.setAttribute("y1", eqMidY());
-  zero.setAttribute("x2", EQ_VB_W - EQ_PAD_X); zero.setAttribute("y2", eqMidY());
+  zero.setAttribute("x2", eqVbW - EQ_PAD_X); zero.setAttribute("y2", eqMidY());
   zero.setAttribute("class", "eq-zero-line");
   svg.appendChild(zero);
 
@@ -1162,6 +1290,8 @@ window.addEventListener("pointerup", () => {
   renderEqCurveInto(svg, target, eqDrag);
 });
 
+// ---------- Setups ----------
+
 function renderSetups() {
   const list = $("#setupList");
   list.textContent = "";
@@ -1174,11 +1304,13 @@ function renderSetups() {
     return;
   }
   state.setups.forEach((s, i) => {
-    const isActive = s.name === state.activeSetup;
+    const isActive = s.name === state.activeSetup;   // loaded, untouched since
+    const isEditing = s.name === state.editingSetup; // loaded, possibly modified since
+    const isModified = isEditing && !state.activeSetup;
     const isPlaying = s.name === state.playingSetup && state.running && !state.starting;
     const row = document.createElement("div");
     row.className = "setup" + (isActive ? " on" : "");
-    row.title = "Cliquer pour sélectionner et modifier ce setup (sans l'activer)"
+    row.title = "Cliquer pour sélectionner et modifier ce setup (sans le jouer)"
               + (i < 9 ? ` · Ctrl+Maj+${i + 1} pour le jouer directement` : "");
 
     const ico = document.createElement("div");
@@ -1188,13 +1320,27 @@ function renderSetups() {
     // replace its digit.
     ico.textContent = i < 9 ? String(i + 1) : "•";
 
+    const main = document.createElement("div");
+    main.className = "setup-main";
     const name = document.createElement("div");
     name.className = "setup-name";
     name.textContent = s.name;
-
+    const sub = document.createElement("div");
+    sub.className = "setup-sub";
     const count = document.createElement("span");
-    count.className = "setup-count";
-    count.textContent = `${s.count} enceinte${s.count > 1 ? "s" : ""}`;
+    count.textContent = plural(s.count, "enceinte");
+    sub.appendChild(count);
+    const badge = (cls, text, title) => {
+      const b = document.createElement("span");
+      b.className = "badge " + cls;
+      b.textContent = text;
+      if (title) b.title = title;
+      sub.appendChild(b);
+    };
+    if (isPlaying) badge("playing", "en lecture");
+    if (isModified) badge("modified", "modifié", "La configuration a changé depuis l'application de ce setup");
+    else if (isActive) badge("selected", isPlaying ? "chargé" : "sélectionné");
+    main.append(name, sub);
 
     const play = document.createElement("button");
     play.className = "setup-play" + (isPlaying ? " playing" : "");
@@ -1205,33 +1351,35 @@ function renderSetups() {
       post("setup_play|" + s.name);
     });
 
+    row.append(ico, main);
+    if (isModified) {
+      // The "save changes" button lives on the row it would overwrite.
+      const save = document.createElement("button");
+      save.className = "ghost-btn setup-save";
+      save.innerHTML = SVG_SAVE + "Enregistrer";
+      save.title = `Enregistrer les modifications dans « ${s.name} »`;
+      save.addEventListener("click", ev => { ev.stopPropagation(); post("setup_update"); });
+      row.appendChild(save);
+    }
     const del = document.createElement("button");
     del.className = "setup-del";
     del.textContent = "✕";
     del.title = "Supprimer ce setup";
+    del.tabIndex = -1;
     del.addEventListener("click", ev => {
       ev.stopPropagation();
       askDeleteSetup(s.name);
     });
-
-    row.append(ico, name, count, play, del);
+    row.append(play, del);
     // Selecting a setup only loads it into the live device list for viewing
     // / editing -- it never starts or interrupts playback. Activating it is
     // a separate, deliberate action: the play button here, or the main
     // "Démarrer le groupe" button once it's selected.
-    row.addEventListener("click", () => post("setup_select|" + s.name));
+    const select = () => post("setup_select|" + s.name);
+    row.addEventListener("click", select);
+    makeRowKeyboardable(row, select, () => post("setup_play|" + s.name));
     list.appendChild(row);
   });
-}
-
-// Shown only once a setup has been applied/saved AND the live config has
-// since diverged from it (state.activeSetup is cleared on the first tweak,
-// but state.editingSetup keeps remembering which setup that was).
-function renderUpdateSetupButton() {
-  const show = !!state.editingSetup && !state.activeSetup;
-  const btn = $("#updateSetupBtn");
-  btn.style.display = show ? "" : "none";
-  if (show) btn.title = `Enregistrer les modifications dans « ${state.editingSetup} »`;
 }
 
 // A manual tweak means the current state no longer matches the applied
@@ -1240,7 +1388,6 @@ function markModified() {
   if (!state.activeSetup) return;
   state.activeSetup = "";
   renderSetups();
-  renderUpdateSetupButton();
 }
 
 function renderMasterVolume() {
@@ -1265,10 +1412,35 @@ function renderFooter() {
   kbdSeq(el, (state.toggleHotkey || "Ctrl+Alt+G").split("+"));
   el.appendChild(document.createTextNode(" groupe · "));
   kbdSeq(el, (state.switcherHotkey || "Ctrl+Alt+S").split("+"));
-  el.appendChild(document.createTextNode(" switcher · "));
-  kbdSeq(el, ["Ctrl", "Maj", "1-9"]);
+  el.appendChild(document.createTextNode(" switcher"));
+  if (state.setupDigitHotkeys !== false) {
+    el.appendChild(document.createTextNode(" · "));
+    kbdSeq(el, ["Ctrl", "Maj", "1-9"]);
+    el.appendChild(document.createTextNode(" setup direct"));
+  }
   el.appendChild(document.createTextNode(
-    " setup direct · double-clic : renommer · clic simple : régler dans le panneau Égaliseur. Fermer range AudioLinker près de l'horloge."));
+    " · clic sur une enceinte : sa fiche · double-clic sur le nom : renommer · clic droit : plus. Fermer range AudioLinker près de l'horloge."));
+}
+
+// ---------- Banner (persistent notice under the header) ----------
+
+// Two layers: a native one (set by "banner" messages -- audio left the
+// group...) and one the page derives from the live status (a source gone).
+// The native one wins while it is set.
+let nativeBanner = null; // {message, action, actionLabel} or null
+let statusBanner = "";
+
+function renderBanner() {
+  const el = $("#banner"), txt = $("#bannerText"), btn = $("#bannerBtn");
+  const b = nativeBanner || (statusBanner ? { message: statusBanner } : null);
+  el.hidden = !b;
+  if (!b) return;
+  txt.textContent = b.message;
+  btn.hidden = !b.action;
+  if (b.action) {
+    btn.textContent = b.actionLabel || "OK";
+    btn.onclick = () => post(b.action);
+  }
 }
 
 function renderAll() {
@@ -1276,15 +1448,15 @@ function renderAll() {
   renderHeader();
   renderList();
   renderInputs();
-  renderEqCard();
+  renderSheet();
   renderSetups();
-  renderUpdateSetupButton();
   renderMasterVolume();
   renderFooter();
+  renderBanner();
   announceSpectrumTarget();
 }
 
-// ---------- Per-speaker source (selected in the EQ panel) ----------
+// ---------- Per-speaker source (selected in the sheet) ----------
 
 // Apps currently playing audio -- fetched on demand ("sources" command,
 // answered by a "sources" message) rather than carried by every state
@@ -1322,7 +1494,7 @@ function populateSourceOptions(d) {
   sel.value = d.sourcePid || 0;
 }
 
-// ---------- Per-speaker context menu (identify / mute / color) ----------
+// ---------- Per-speaker context menu (identify / mute / counters / color / automation) ----------
 
 const PRESET_COLORS = ["ef6f6f", "e8a33d", "f5d76e", "3ddc84", "4fd1e0", "7c6fef", "c77dff", "f472b6"];
 
@@ -1359,6 +1531,10 @@ function openDeviceMenu(d, x, y) {
     markModified();
   });
   muteCheck.textContent = d.muted ? "✓" : "";
+
+  if (state.running) {
+    addAction("Remettre les compteurs à zéro", () => post(`resetcounters|${d.id}`));
+  }
 
   const sep = document.createElement("div");
   sep.className = "ctx-sep";
@@ -1450,10 +1626,13 @@ document.addEventListener("click", ev => {
 window.addEventListener("blur", closeDeviceMenu);
 
 window.addEventListener("keydown", ev => {
-  if (ev.key === "Escape") { closeAllModals(); closeDeviceMenu(); }
+  if (ev.key !== "Escape") return;
+  closeAllModals();
+  closeDeviceMenu();
+  if (selectedId && !document.querySelector(".modal.show")) selectDevice(null);
 });
 
-// ---------- Live status ----------
+// ---------- Live status (counters, flags: every 250ms) ----------
 
 // Devices that dropped out mid-playback (Bluetooth cut...); the engine keeps
 // retrying them, we surface the transition both ways as toasts.
@@ -1468,11 +1647,9 @@ function applyStatus(m) {
   state.starting = m.starting;
   if (headerDirty) renderHeader();
   if (!m.running) { lostIds.clear(); lostSourceIds.clear(); }
+  const lostNames = [];
   for (const [id, r] of rowRefs) {
     const st = m.outputs && m.outputs.find(o => o.id === id);
-    if (id === selectedId) {
-      feedEqFlow((st && m.running && st.bands) ? st.bands.map(levelToUnit) : zeroBands());
-    }
     if (st && m.running) {
       const d = device(id);
       if (r.wasActive === true && !st.active) {
@@ -1489,24 +1666,53 @@ function applyStatus(m) {
         lostSourceIds.delete(id);
         if (d) toast(`${displayName(d)} : source rétablie`, "ok");
       }
+      if (st.sourceLost && d) lostNames.push(displayName(d));
       r.wasActive = st.active;
       r.row.classList.toggle("active", st.active);
-      const w = Math.sqrt(Math.min(1, Math.max(0, st.peak))) * 100;
-      r.fill.style.width = w.toFixed(1) + "%";
-      r.fill.classList.toggle("hot", st.peak > 0.85);
+      // Glitches: ring underruns + hard drift corrections since the start.
+      const g = (st.underruns || 0) + (st.drift || 0);
+      r.glitch.classList.toggle("lost", !!st.sourceLost);
       if (st.sourceLost) {
         r.glitch.hidden = false;
-        r.glitch.textContent = "⚠ source perdue";
+        r.glitch.textContent = "source perdue";
+        r.glitch.title = "L'application ou le périphérique capturé a disparu : cette sortie joue du silence";
       } else {
-        const g = (st.underruns || 0) + (st.drift || 0);
         r.glitch.hidden = g === 0;
-        r.glitch.textContent = `⚠ ${st.underruns}/${st.drift}`;
+        r.glitch.textContent = plural(g, "craquement");
+        r.glitch.title = `${st.underruns} sous-alimentation${st.underruns > 1 ? "s" : ""} du tampon, ` +
+                         `${st.drift} correction${st.drift > 1 ? "s" : ""} de dérive depuis le démarrage` +
+                         " — remise à zéro : clic droit sur l'enceinte";
       }
+      // Device-side lag, as the endpoint's own clock reports it.
+      r.lag.hidden = !(st.lagMs > 0);
+      if (st.lagMs > 0) r.lag.textContent = `retard ~${st.lagMs} ms`;
     } else {
       r.wasActive = undefined;
       r.row.classList.remove("active");
       r.fill.style.width = "0%";
       r.glitch.hidden = true;
+      r.lag.hidden = true;
+    }
+  }
+  statusBanner = lostNames.length
+    ? `Source perdue pour ${lostNames.join(", ")} : lecture en silence jusqu'au retour de la source.`
+    : "";
+  renderBanner();
+  if (!m.running) applyPeaks({ outputs: [], micPeaks: [] });
+}
+
+// ---------- Level meters ("peaks": every 100ms) ----------
+
+function applyPeaks(m) {
+  for (const [id, r] of rowRefs) {
+    const p = m.outputs && m.outputs.find(o => o.id === id);
+    const peak = p && state.running ? p.peak : 0;
+    const w = Math.sqrt(Math.min(1, Math.max(0, peak))) * 100;
+    r.fill.style.width = w.toFixed(1) + "%";
+    r.fill.classList.toggle("hot", peak > 0.85);
+    if (id === selectedId) {
+      feedEqFlow((p && state.running && p.bands) ? p.bands.map(levelToUnit) : zeroBands());
+      startEqFlow();
     }
   }
   // INPUTS tab VU meters -- micPeaks is only populated while metering is on.
@@ -1523,6 +1729,7 @@ function applyStatus(m) {
 
 $("#toggleBtn").addEventListener("click", () => post("toggle"));
 $("#refreshBtn").addEventListener("click", () => post("refresh"));
+$("#muteBtn").addEventListener("click", () => post("mutegroup|" + (state.groupMuted ? 0 : 1)));
 
 $("#devTabs").addEventListener("click", ev => {
   const btn = ev.target.closest(".seg-tab");
@@ -1724,7 +1931,6 @@ $("#saveSetupBtn").addEventListener("click", () => {
   post("setup_save|" + $("#setupName").value);
   $("#setupName").value = "";
 });
-$("#updateSetupBtn").addEventListener("click", () => post("setup_update"));
 $("#setupName").addEventListener("keydown", ev => {
   if (ev.key === "Enter") $("#saveSetupBtn").click();
 });
@@ -1777,6 +1983,8 @@ if (bridge) {
       if (!sourcesRequested) requestSources(); // once, so the ♪ badges have names
     } else if (m.type === "status") {
       applyStatus(m);
+    } else if (m.type === "peaks") {
+      applyPeaks(m);
     } else if (m.type === "sources") {
       sources = m.sources || [];
       for (const d of state.devices) updateBadges(d);
@@ -1784,6 +1992,9 @@ if (bridge) {
       if (live) populateSourceOptions(live);
     } else if (m.type === "cal") {
       applyCal(m);
+    } else if (m.type === "banner") {
+      nativeBanner = m.message ? { message: m.message, action: m.action || "", actionLabel: m.actionLabel || "" } : null;
+      renderBanner();
     } else if (m.type === "error") {
       toast(m.message, "", m.action ? { cmd: m.action, label: m.actionLabel || "OK" } : null);
     } else if (m.type === "info") {

@@ -25,6 +25,19 @@ void SaveConfig() {
 // the group's master volume. g_settings keeps s.volumePercent as the
 // unscaled base value, so the per-speaker balance survives moving the master
 // slider (and is what gets persisted/shown on that speaker's own slider).
+void UpdateMeterTimers() {
+    if (!g_mainWnd) return;
+    if (g_statusTimerForGroup || g_micMetering) {
+        SetTimer(g_mainWnd, IDT_STATUS_TIMER, kStatusIntervalMs, nullptr);
+        SetTimer(g_mainWnd, IDT_VU_TIMER, kVuIntervalMs, nullptr);
+    } else {
+        KillTimer(g_mainWnd, IDT_STATUS_TIMER);
+        KillTimer(g_mainWnd, IDT_VU_TIMER);
+    }
+}
+
+bool EffectiveMuted(const OutputSettings& s) { return s.muted || g_groupMuted; }
+
 int EffectiveVolume(const OutputSettings& s) {
     return ClampVolume((s.volumePercent * g_masterVolumePercent + 50) / 100);
 }
@@ -101,7 +114,7 @@ void OnCreateGroup(HWND hwnd) {
         cfg.channelMode = s.channelMode;
         cfg.volumePercent = EffectiveVolume(s);
         cfg.eqDb = s.eqDb;
-        cfg.muted = s.muted;
+        cfg.muted = EffectiveMuted(s);
         cfg.sourcePid = s.sourcePid;
         outputs.push_back(cfg);
     }
@@ -182,18 +195,21 @@ void OnCreateGroup(HWND hwnd) {
         return;
     }
 
-    // The timer does double duty: while isStarting(), it polls for that to
-    // finish (see WM_TIMER); once running, it drives the VU meters.
+    // The status timer does double duty: while isStarting(), it polls for
+    // that to finish (see WM_TIMER); once running, it reports counters, and
+    // the VU timer the level meters.
     g_playingSetup = g_activeSetup;
     g_awaitingGroupStart = true;
     g_statusTimerForGroup = true;
-    SetTimer(hwnd, IDT_STATUS_TIMER, 250, nullptr);
+    UpdateMeterTimers();
+    SendBanner(L"");
     SendState();
 }
 
 void OnStop(HWND hwnd) {
     g_statusTimerForGroup = false;
-    if (!g_micMetering) KillTimer(hwnd, IDT_STATUS_TIMER);
+    UpdateMeterTimers();
+    SendBanner(L"");
     if (g_optimizing) { KillTimer(hwnd, IDT_OPT_TIMER); g_optimizing = false; }
     g_awaitingGroupStart = false;
     g_playingSetup.clear();
@@ -262,7 +278,7 @@ void PushLiveSettingsToEngine(const std::wstring& groupName) {
         g_engine.setChannelMode(d.id, s.channelMode);
         g_engine.setVolumePercent(d.id, EffectiveVolume(s));
         for (int b = 0; b < kEqBandCount; ++b) g_engine.setEqBand(d.id, b, s.eqDb[b]);
-        g_engine.setMuted(d.id, s.muted);
+        g_engine.setMuted(d.id, EffectiveMuted(s));
         g_engine.resyncOutput(d.id);
     }
     // The Windows-visible endpoint name follows the setup (see OnCreateGroup).

@@ -60,6 +60,7 @@ void SendState() {
     j["lowLatency"] = g_lowLatency;
     j["setupDigitHotkeys"] = g_setupDigitHotkeys;
     j["optimizing"] = g_optimizing;
+    j["groupMuted"] = g_groupMuted;
     j["theme"] = g_themeOverride;
     j["toggleHotkey"] = U8(FormatHotkey(g_toggleHotkeyMods, g_toggleHotkeyVk));
     j["switcherHotkey"] = U8(FormatHotkey(g_switcherHotkeyMods, g_switcherHotkeyVk));
@@ -121,6 +122,7 @@ void SendState() {
                                 { "volume", micVol }, { "muted", micMuted } });
     }
     PostJson(j);
+    UpdateTrayState(); // every state change the tray could reflect passes here
 }
 
 // Apps currently playing audio, for the speaker sheet's Source dropdown.
@@ -141,12 +143,39 @@ void SendSources() {
 // bytes of a full double.
 double Milli(double v) { return std::round(v * 1000.0) / 1000.0; }
 
+// Level meters only (VU bars, the selected output's spectrum, mic VUs), on
+// the faster IDT_VU_TIMER. takePeaks() is a destructive read (meters reset
+// to 0), so it is called exactly once per tick, here -- every other reader
+// (status, optimizer) only uses the non-destructive getStatus().
+void SendPeaks() {
+    json j;
+    j["type"] = "peaks";
+    j["outputs"] = json::array();
+    for (const auto& p : g_engine.takePeaks()) {
+        json jo;
+        jo["id"] = U8(p.deviceId);
+        jo["peak"] = Milli(p.peak);
+        jo["bands"] = json::array();
+        for (int b = 0; b < kSpectrumBandCount; ++b) jo["bands"].push_back(Milli(p.spectrumBands[b]));
+        j["outputs"].push_back(std::move(jo));
+    }
+    // Per-mic peaks for the INPUTS tab -- empty unless metering is on.
+    j["micPeaks"] = json::array();
+    for (const auto& [id, peak] : g_engine.getMicPeaks()) {
+        j["micPeaks"].push_back({ { "id", U8(id) }, { "peak", Milli(peak) } });
+    }
+    PostJson(j);
+}
+
+void SendBanner(const std::wstring& message, const std::wstring& actionCmd,
+                const std::wstring& actionLabel) {
+    json j = { { "type", "banner" }, { "message", U8(message) },
+               { "action", U8(actionCmd) }, { "actionLabel", U8(actionLabel) } };
+    PostJson(j);
+}
+
 void SendStatus() {
     auto status = g_engine.getStatus();
-    // takePeaks() is a destructive read (meters reset to 0), so it is called
-    // exactly once per timer tick, here -- every other reader (optimizer,
-    // alignment) only uses the non-destructive getStatus().
-    auto peaks = g_engine.takePeaks();
 
     // A captured app that died no longer takes the engine down (its outputs
     // just play silence), so the group's stop path won't unroute it anytime
@@ -176,29 +205,14 @@ void SendStatus() {
     j["starting"] = g_engine.isStarting();
     j["outputs"] = json::array();
     for (const auto& st : status) {
-        const OutputPeaks* pk = nullptr;
-        for (const auto& p : peaks) {
-            if (p.deviceId == st.deviceId) { pk = &p; break; }
-        }
         json jo;
         jo["id"] = U8(st.deviceId);
         jo["active"] = st.active;
         jo["sourceLost"] = st.sourceLost;
-        jo["peak"] = Milli(pk ? pk->peak : 0.0);
         jo["underruns"] = st.underruns;
         jo["drift"] = st.driftCorrections;
         jo["lagMs"] = st.deviceLagMs;
-        jo["bands"] = json::array();
-        for (int b = 0; b < kSpectrumBandCount; ++b) {
-            jo["bands"].push_back(Milli(pk ? pk->spectrumBands[b] : 0.0));
-        }
         j["outputs"].push_back(std::move(jo));
-    }
-    // Per-mic peaks for the INPUTS tab's VU meters -- empty unless metering
-    // is on (tab visible).
-    j["micPeaks"] = json::array();
-    for (const auto& [id, peak] : g_engine.getMicPeaks()) {
-        j["micPeaks"].push_back({ { "id", U8(id) }, { "peak", Milli(peak) } });
     }
     PostJson(j);
 }
@@ -323,8 +337,12 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
         if (g_previousDefaultId.empty()) return;
         for (const auto& d : g_deviceManager->enumerateRenderDevices()) {
             if (!IsCableDevice(d.name)) continue;
-            if (SetDefaultEndpointAllRoles(d.id)) SendInfo(L"Le groupe a repris la sortie par défaut.");
-            else SendError(L"Impossible de redéfinir la sortie par défaut.");
+            if (SetDefaultEndpointAllRoles(d.id)) {
+                SendBanner(L"");
+                SendInfo(L"Le groupe a repris la sortie par défaut.");
+            } else {
+                SendError(L"Impossible de redéfinir la sortie par défaut.");
+            }
             return;
         }
         return;
@@ -568,6 +586,20 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
         g_engine.identifyOutput(rest);
         return;
     }
+    if (cmd == L"mutegroup") {
+        // mutegroup|0/1 -- whole-group mute, on top of each output's own
+        // flag and never persisted.
+        g_groupMuted = (rest == L"1");
+        if (g_engine.isRunning()) {
+            for (const auto& d : g_outputDevices) g_engine.setMuted(d.id, EffectiveMuted(g_settings[d.id]));
+        }
+        SendState();
+        return;
+    }
+    if (cmd == L"resetcounters") {
+        g_engine.resetCounters(rest); // resetcounters|deviceId (empty = all)
+        return;
+    }
     if (cmd == L"spectrum") {
         // spectrum|deviceId (empty = none) -- which output, if any, has its
         // EQ panel on screen and therefore needs the 10-band spectrum
@@ -652,7 +684,7 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
         SaveConfig();
     } else if (cmd == L"mute") {
         s.muted = (v != 0);
-        if (g_engine.isRunning()) g_engine.setMuted(deviceId, s.muted);
+        if (g_engine.isRunning()) g_engine.setMuted(deviceId, EffectiveMuted(s));
         SaveConfig();
     } else if (cmd == L"channel") {
         s.channelMode = ClampChannelMode(v);
