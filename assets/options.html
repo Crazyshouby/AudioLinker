@@ -4,106 +4,11 @@
 <meta charset="utf-8">
 <title>Options — AudioLinker</title>
 <style>
-:root {
-  --bg: #0e1013;
-  --card-2: #1b202a;
-  --border: #262b35;
-  --border-soft: #1f232c;
-  --text: #eceef2;
-  --muted: #98a0ae;
-  --faint: #5c6370;
-  --track-off: #10131a;
-  --accent: #7c6fef;
-  --accent-2: #a78bfa;
-  --accent-rgb: 124, 111, 239;
-  color-scheme: dark;
-}
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #d4d5d9;
-    --card-2: #cfd1d5;
-    --border: #b8bbc1;
-    --border-soft: #c6c8cd;
-    --text: #1c1e23;
-    --muted: #525864;
-    --faint: #7d818b;
-    --track-off: #b9bcc2;
-    color-scheme: light;
-  }
-}
-/* Theme override selector on this same page (state.theme): the media query
-   above is just the "system/auto" default -- these win in both directions
-   once JS sets data-theme on <html> (see applyTheme()). */
-:root[data-theme="light"] {
-  --bg: #d4d5d9; --card-2: #cfd1d5; --border: #b8bbc1; --border-soft: #c6c8cd;
-  --text: #1c1e23; --muted: #525864; --faint: #7d818b; --track-off: #b9bcc2; color-scheme: light;
-}
-:root[data-theme="dark"] {
-  --bg: #0e1013; --card-2: #1b202a; --border: #262b35; --border-soft: #1f232c;
-  --text: #eceef2; --muted: #98a0ae; --faint: #5c6370; --track-off: #10131a; color-scheme: dark;
-}
-* { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; }
-body {
-  background: var(--bg);
-  color: var(--text);
-  font: 14px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  user-select: none;
-  overflow: hidden;
-}
+/*@common.css@*/
 #app { display: grid; gap: 14px; height: 100%; padding: 20px; align-content: start; overflow-y: auto; }
-
-.row { display: flex; align-items: center; gap: 12px; }
 .row > label { width: auto; flex: 1; font-size: 13px; color: var(--muted); cursor: pointer; }
-
-.ghost-btn {
-  border: 1px solid var(--border); background: transparent; color: var(--muted);
-  border-radius: 8px; padding: 6px 14px; font: 12.5px "Segoe UI Variable Text", "Segoe UI", sans-serif;
-  cursor: pointer; transition: color 0.15s, border-color 0.15s, background 0.15s;
-}
-.ghost-btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent); background: rgba(var(--accent-rgb),0.08); }
-.ghost-btn.on { color: #fff; background: var(--accent); border-color: var(--accent); }
-.ghost-btn:disabled { opacity: 0.45; cursor: default; }
-
-/* Must out-specificity ".row > label" above (which sets width:auto;flex:1
-   for the plain text labels here) so the toggle pill keeps its fixed size
-   instead of stretching to fill the row. */
-.switch, .row > label.switch { position: relative; width: 40px; height: 22px; flex: none; cursor: pointer; }
-.switch input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
-.track {
-  position: absolute; inset: 0; border-radius: 11px; background: var(--card-2);
-  border: 1px solid var(--border); transition: all 0.2s; pointer-events: none;
-}
-.track::after {
-  content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
-  border-radius: 50%; background: var(--faint); transition: all 0.2s;
-}
-.switch input:checked + .track { background: var(--accent); border-color: var(--accent); }
-.switch input:checked + .track::after { left: 20px; background: #fff; }
-
-input[type="range"] {
-  -webkit-appearance: none; flex: 1; height: 6px; border-radius: 3px; outline: none;
-  background: linear-gradient(to right, var(--accent) 0%, var(--accent) 50%, var(--track-off) 50%, var(--track-off) 100%);
-}
-input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
-  background: #fff; border: 2.5px solid var(--accent); cursor: pointer;
-  transition: transform 0.1s, box-shadow 0.15s;
-}
-input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); box-shadow: 0 0 0 5px rgba(var(--accent-rgb),0.15); }
-input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.05); }
-.val { width: 56px; flex: none; text-align: right; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ghost-btn { padding: 6px 14px; }
 .sep { height: 1px; background: var(--border-soft); margin: 2px 0; }
-
-#toast {
-  position: fixed; left: 50%; bottom: 20px; transform: translate(-50%, 16px);
-  background: #2a1d20; border: 1px solid rgba(239, 111, 111, 0.5); color: #ffd9d9;
-  border-radius: 10px; padding: 10px 18px; font-size: 13px; max-width: 85%;
-  opacity: 0; pointer-events: none; transition: opacity 0.25s, transform 0.25s;
-}
-#toast.ok { background: #182a20; border-color: rgba(61, 220, 132, 0.5); color: #c9f5dc; }
-#toast.show { opacity: 1; transform: translate(-50%, 0); }
 </style>
 </head>
 <body>
@@ -156,7 +61,8 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.05); }
             title="Réduit automatiquement la marge jusqu'au réglage le plus bas sans craquement. Démarrez le groupe d'abord.">
       Optimiser la latence automatiquement</button>
   </div>
-  <div class="row" style="justify-content:flex-end">
+  <div class="row">
+    <label id="versionLabel" style="cursor:default;font-size:12px;color:var(--faint)"></label>
     <button class="ghost-btn" id="openLogBtn" style="font-size:11.5px;padding:4px 10px">
       Ouvrir le journal de diagnostic</button>
   </div>
@@ -179,9 +85,7 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.05); }
 
 <script>
 "use strict";
-const $ = s => document.querySelector(s);
-const bridge = window.chrome && window.chrome.webview;
-const post = m => { if (bridge) bridge.postMessage(m); };
+/*@common.js@*/
 
 let state = {
   autostart: false, launchAtStartup: false,
@@ -201,18 +105,8 @@ function renderLatencyEstimate() {
     `Latence totale du groupe ≈ ${total} ms (hors latence propre au Bluetooth)`;
 }
 
-function paintRange(el) {
-  const min = +el.min, max = +el.max, v = +el.value;
-  const p = ((v - min) / (max - min)) * 100;
-  el.style.background =
-    `linear-gradient(to right, var(--accent) 0%, var(--accent) ${p}%, var(--track-off) ${p}%, var(--track-off) 100%)`;
-}
-
-function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme === 1 ? "light" : theme === 2 ? "dark" : "";
-}
-
 function renderAll() {
+  $("#versionLabel").textContent = state.version ? "AudioLinker " + state.version : "";
   $("#autostart").checked = state.autostart;
   $("#launchWin").checked = !!state.launchAtStartup;
 
@@ -315,22 +209,13 @@ window.addEventListener("keydown", ev => {
   if (ev.key === "Escape") post("cancelhotkeycapture");
 });
 
-let toastTimer = 0;
-function toast(msg, kind) {
-  const t = $("#toast");
-  t.textContent = msg;
-  t.classList.toggle("ok", kind === "ok");
-  t.classList.add("show");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove("show"), 6000);
-}
-
 if (bridge) {
   bridge.addEventListener("message", ev => {
     const m = ev.data;
     if (!m || !m.type) return;
     if (m.type === "state") {
       state = m;
+      applyAccent(m.accent);
       applyTheme(m.theme);
       renderAll();
     } else if (m.type === "error") {

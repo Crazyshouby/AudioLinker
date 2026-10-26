@@ -1,0 +1,116 @@
+/* Shared by ui.html and options.html -- inlined into each page at build time
+   by cmake/InlineAssets.cmake, in place of the "@common.css@" marker comment.
+   Theme tokens, base typography and the controls both pages use: ghost
+   buttons, sliders, switches, the toast. Page layout stays in each page's
+   own <style>. */
+
+:root {
+  --bg: #0e1013;
+  --card: #15181e;
+  --card-2: #1b202a;
+  --border: #262b35;
+  --border-soft: #1f232c;
+  --text: #eceef2;
+  --muted: #98a0ae;
+  --faint: #5c6370;
+  --track-off: #10131a;
+  --accent: #7c6fef;
+  --accent-2: #a78bfa;
+  --accent-rgb: 124, 111, 239;
+  --accent-glow: rgba(var(--accent-rgb), 0.35);
+  --green: #3ddc84;
+  --warn: #e8a33d;
+  --red: #ef6f6f;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #d4d5d9;
+    --card: #dfe0e3;
+    --card-2: #cfd1d5;
+    --border: #b8bbc1;
+    --border-soft: #c6c8cd;
+    --text: #1c1e23;
+    --muted: #525864;
+    --faint: #7d818b;
+    --track-off: #b9bcc2;
+    --green: #1a9c58;
+    --warn: #b5760a;
+    --red: #c94343;
+    color-scheme: light;
+  }
+}
+/* Options window's theme override (state.theme): the media query above is
+   just the "system/auto" default -- these win in both directions once JS
+   sets data-theme on <html> (see applyTheme). The native side mirrors these
+   values (WindowBgForTheme, switcher palette): keep them in sync. */
+:root[data-theme="light"] {
+  --bg: #d4d5d9; --card: #dfe0e3; --card-2: #cfd1d5; --border: #b8bbc1; --border-soft: #c6c8cd;
+  --text: #1c1e23; --muted: #525864; --faint: #7d818b; --track-off: #b9bcc2;
+  --green: #1a9c58; --warn: #b5760a; --red: #c94343; color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #0e1013; --card: #15181e; --card-2: #1b202a; --border: #262b35; --border-soft: #1f232c;
+  --text: #eceef2; --muted: #98a0ae; --faint: #5c6370; --track-off: #10131a;
+  --green: #3ddc84; --warn: #e8a33d; --red: #ef6f6f; color-scheme: dark;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  overflow: hidden;
+}
+
+.row { display: flex; align-items: center; gap: 12px; }
+
+.ghost-btn {
+  border: 1px solid var(--border); background: transparent; color: var(--muted);
+  border-radius: 8px; padding: 5px 12px; font: 12.5px "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  cursor: pointer; transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.ghost-btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent); background: rgba(var(--accent-rgb),0.08); }
+.ghost-btn:disabled { opacity: 0.4; cursor: default; }
+.ghost-btn.on { color: #fff; background: var(--accent); border-color: var(--accent); }
+.ghost-btn.on:hover:not(:disabled) { color: #fff; background: var(--accent); filter: brightness(1.1); }
+
+input[type="range"] {
+  -webkit-appearance: none; flex: 1; height: 6px; border-radius: 3px; outline: none;
+  background: linear-gradient(to right, var(--accent) 0%, var(--accent) 50%, var(--track-off) 50%, var(--track-off) 100%);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; border: 2.5px solid var(--accent); cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.15s;
+}
+input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); box-shadow: 0 0 0 5px rgba(var(--accent-rgb),0.15); }
+input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.05); }
+.val { width: 56px; flex: none; text-align: right; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Toggle pill. Must out-specificity any ".row > label" rule of the page so
+   the pill keeps its fixed size: the knob's checked position assumes 40px. */
+.switch, .row > label.switch { position: relative; width: 40px; height: 22px; flex: none; cursor: pointer; }
+.switch input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+.track {
+  position: absolute; inset: 0; border-radius: 11px; background: var(--card-2);
+  border: 1px solid var(--border); transition: all 0.2s; pointer-events: none;
+}
+.track::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+  border-radius: 50%; background: var(--faint); transition: all 0.2s;
+}
+.switch input:checked + .track { background: var(--accent); border-color: var(--accent); }
+.switch input:checked + .track::after { left: 20px; background: #fff; }
+
+#toast {
+  position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 16px);
+  background: #2a1d20; border: 1px solid rgba(239, 111, 111, 0.5); color: #ffd9d9;
+  border-radius: 10px; padding: 10px 18px; font-size: 13px; max-width: 80%;
+  opacity: 0; pointer-events: none; transition: opacity 0.25s, transform 0.25s;
+}
+#toast.ok { background: #182a20; border-color: rgba(61, 220, 132, 0.5); color: #c9f5dc; }
+#toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+#toast .toast-action { margin-left: 14px; color: inherit; border-color: currentColor; padding: 4px 10px; }

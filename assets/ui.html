@@ -4,65 +4,7 @@
 <meta charset="utf-8">
 <title>AudioLinker</title>
 <style>
-:root {
-  --bg: #0e1013;
-  --card: #15181e;
-  --card-2: #1b202a;
-  --border: #262b35;
-  --border-soft: #1f232c;
-  --text: #eceef2;
-  --muted: #98a0ae;
-  --faint: #5c6370;
-  --track-off: #10131a;
-  --accent: #7c6fef;
-  --accent-2: #a78bfa;
-  --accent-rgb: 124, 111, 239;
-  --accent-glow: rgba(var(--accent-rgb), 0.35);
-  --green: #3ddc84;
-  --warn: #e8a33d;
-  --red: #ef6f6f;
-  color-scheme: dark;
-}
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #d4d5d9;
-    --card: #dfe0e3;
-    --card-2: #cfd1d5;
-    --border: #b8bbc1;
-    --border-soft: #c6c8cd;
-    --text: #1c1e23;
-    --muted: #525864;
-    --faint: #7d818b;
-    --track-off: #b9bcc2;
-    --green: #1a9c58;
-    --warn: #b5760a;
-    --red: #c94343;
-    color-scheme: light;
-  }
-}
-/* Options window's theme override (state.theme): the media query above is
-   just the "system/auto" default -- these win in both directions once JS
-   sets data-theme on <html> (see applyAccent/the "state" message handler). */
-:root[data-theme="light"] {
-  --bg: #d4d5d9; --card: #dfe0e3; --card-2: #cfd1d5; --border: #b8bbc1; --border-soft: #c6c8cd;
-  --text: #1c1e23; --muted: #525864; --faint: #7d818b; --track-off: #b9bcc2;
-  --green: #1a9c58; --warn: #b5760a; --red: #c94343; color-scheme: light;
-}
-:root[data-theme="dark"] {
-  --bg: #0e1013; --card: #15181e; --card-2: #1b202a; --border: #262b35; --border-soft: #1f232c;
-  --text: #eceef2; --muted: #98a0ae; --faint: #5c6370; --track-off: #10131a;
-  --green: #3ddc84; --warn: #e8a33d; --red: #ef6f6f; color-scheme: dark;
-}
-* { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; }
-body {
-  background: var(--bg);
-  color: var(--text);
-  font: 14px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  user-select: none;
-  overflow: hidden;
-}
+/*@common.css@*/
 #app { display: flex; flex-direction: column; height: 100%; padding: 18px 20px 10px; gap: 14px; }
 
 /* ---------- Header ---------- */
@@ -124,16 +66,6 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
   font-size: 11px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted);
 }
 .card > h2 { margin-bottom: 10px; }
-
-.ghost-btn {
-  border: 1px solid var(--border); background: transparent; color: var(--muted);
-  border-radius: 8px; padding: 5px 12px; font: 12.5px "Segoe UI Variable Text", "Segoe UI", sans-serif;
-  cursor: pointer; transition: color 0.15s, border-color 0.15s, background 0.15s;
-}
-.ghost-btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent); background: rgba(var(--accent-rgb),0.08); }
-.ghost-btn:disabled { opacity: 0.4; cursor: default; }
-.ghost-btn.on { color: #fff; background: var(--accent); border-color: var(--accent); }
-.ghost-btn.on:hover:not(:disabled) { color: #fff; background: var(--accent); filter: brightness(1.1); }
 
 /* ---------- Device list ---------- */
 #devicesCard { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 150px; }
@@ -311,7 +243,6 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
 }
 .danger-btn:hover { filter: brightness(1.12); }
 
-.row { display: flex; align-items: center; gap: 12px; }
 .row > label { width: 68px; flex: none; font-size: 13px; color: var(--muted); }
 
 .seg { display: flex; background: var(--card-2); border: 1px solid var(--border-soft); border-radius: 9px; padding: 3px; gap: 3px; }
@@ -322,19 +253,6 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
 }
 .seg button:hover { color: var(--text); }
 .seg button.on { background: var(--accent); color: #fff; box-shadow: 0 2px 8px var(--accent-glow); }
-
-input[type="range"] {
-  -webkit-appearance: none; flex: 1; height: 6px; border-radius: 3px; outline: none;
-  background: linear-gradient(to right, var(--accent) 0%, var(--accent) 50%, var(--track-off) 50%, var(--track-off) 100%);
-}
-input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
-  background: #fff; border: 2.5px solid var(--accent); cursor: pointer;
-  transition: transform 0.1s, box-shadow 0.15s;
-}
-input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); box-shadow: 0 0 0 5px rgba(var(--accent-rgb),0.15); }
-input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.05); }
-.val { width: 56px; flex: none; text-align: right; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* ---------- EQ card ---------- */
 #eqCard { flex: none; }
@@ -414,15 +332,6 @@ footer kbd {
   background: var(--card-2); border: 1px solid var(--border); border-radius: 4px;
   padding: 1px 5px; font: 10.5px Consolas, monospace; color: var(--muted);
 }
-#toast {
-  position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 16px);
-  background: #2a1d20; border: 1px solid rgba(239, 111, 111, 0.5); color: #ffd9d9;
-  border-radius: 10px; padding: 10px 18px; font-size: 13px; max-width: 80%;
-  opacity: 0; pointer-events: none; transition: opacity 0.25s, transform 0.25s;
-}
-#toast.ok { background: #182a20; border-color: rgba(61, 220, 132, 0.5); color: #c9f5dc; }
-#toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
-#toast .toast-action { margin-left: 14px; color: inherit; border-color: currentColor; padding: 4px 10px; }
 </style>
 </head>
 <body>
@@ -578,9 +487,7 @@ footer kbd {
 
 <script>
 "use strict";
-const $ = s => document.querySelector(s);
-const bridge = window.chrome && window.chrome.webview;
-const post = m => { if (bridge) bridge.postMessage(m); };
+/*@common.js@*/
 
 let state = { running: false, starting: false, masterVolume: 100,
               toggleHotkey: "Ctrl+Alt+G", switcherHotkey: "Ctrl+Alt+S",
@@ -594,29 +501,6 @@ const displayName = d => d.alias || d.name;
 // "ef6f6f" -> "239, 111, 111", for CSS custom properties consumed via rgba().
 const hexToRgbTriplet = hex =>
   [hex.slice(0, 2), hex.slice(2, 4), hex.slice(4, 6)].map(h => parseInt(h, 16)).join(", ");
-
-// Options window's theme override: 0 = auto (let prefers-color-scheme
-// decide, same as before), 1 = forced light, 2 = forced dark -- see the
-// :root[data-theme] CSS rules.
-function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme === 1 ? "light" : theme === 2 ? "dark" : "";
-}
-
-// Recolors the whole UI from the Windows accent color (sent in each state
-// message). --accent-2 is a lightened variant for gradients, --accent-rgb
-// feeds every translucent tint; --accent-glow derives from it in CSS.
-function applyAccent(hex) {
-  if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return;
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  const lift = c => Math.round(c + (255 - c) * 0.35);
-  const hex2 = "#" + [lift(r), lift(g), lift(b)].map(v => v.toString(16).padStart(2, "0")).join("");
-  const rootStyle = document.documentElement.style;
-  rootStyle.setProperty("--accent", hex);
-  rootStyle.setProperty("--accent-2", hex2);
-  rootStyle.setProperty("--accent-rgb", `${r}, ${g}, ${b}`);
-}
 
 const SVG_PLAY = '<svg width="16" height="16" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>';
 const SVG_STOP = '<svg width="16" height="16" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>';
@@ -675,13 +559,6 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 // ---------- Rendering ----------
-
-function paintRange(el) {
-  const min = +el.min, max = +el.max, v = +el.value;
-  const p = ((v - min) / (max - min)) * 100;
-  el.style.background =
-    `linear-gradient(to right, var(--accent) 0%, var(--accent) ${p}%, var(--track-off) ${p}%, var(--track-off) 100%)`;
-}
 
 function fmtDb(v) { return (v > 0 ? "+" : "") + v + " dB"; }
 
@@ -1837,28 +1714,6 @@ for (const btn of document.querySelectorAll(".modal-close")) {
 for (const m of document.querySelectorAll(".modal")) {
   // Click on the dimmed backdrop (not the panel) closes.
   m.addEventListener("mousedown", ev => { if (ev.target === m) closeModal("#" + m.id); });
-}
-
-// ---------- Toast ----------
-
-let toastTimer = 0;
-// action: optional {cmd, label} -- a button inside the toast that posts
-// `cmd` to the native side (e.g. "Reprendre" when the default output was
-// changed behind the group's back).
-function toast(msg, kind, action) {
-  const t = $("#toast");
-  t.textContent = msg;
-  if (action) {
-    const btn = document.createElement("button");
-    btn.className = "ghost-btn toast-action";
-    btn.textContent = action.label;
-    btn.addEventListener("click", () => { post(action.cmd); t.classList.remove("show"); });
-    t.appendChild(btn);
-  }
-  t.classList.toggle("ok", kind === "ok");
-  t.classList.add("show");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove("show"), action ? 15000 : 6000);
 }
 
 // ---------- Bridge ----------

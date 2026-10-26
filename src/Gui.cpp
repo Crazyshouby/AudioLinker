@@ -5,6 +5,7 @@
 #include "Log.h"
 #include "PolicyConfig.h"
 #include "resource.h"
+#include "version.h"
 
 #include <shellapi.h>
 #include <dwmapi.h>
@@ -1261,6 +1262,7 @@ void SendState() {
     swprintf(accentHex, 8, L"#%02x%02x%02x", GetRValue(accent), GetGValue(accent), GetBValue(accent));
     std::wstring j = L"{\"type\":\"state\",\"running\":" + BoolJson(g_engine.isRunning()) +
                      L",\"starting\":" + BoolJson(g_engine.isStarting()) +
+                     L",\"version\":\"" L"" AL_VERSION_STR L"\"" +
                      L",\"accent\":\"" + accentHex +
                      L"\",\"autostart\":" + BoolJson(g_autostart) +
                      L",\"launchAtStartup\":" + BoolJson(IsLaunchAtStartupEnabled()) +
