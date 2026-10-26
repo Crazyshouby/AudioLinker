@@ -25,8 +25,10 @@
 #include <atomic>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
+#include <shellscalingapi.h>
 
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
@@ -53,8 +55,17 @@ constexpr UINT_PTR IDT_DEVICE_REFRESH = 2;
 constexpr UINT_PTR IDT_CAL_TIMER = 3;
 // Drives the automatic latency optimizer (see OptimizerTick).
 constexpr UINT_PTR IDT_OPT_TIMER = 4;
+// Bounds a hotkey capture (see StartHotkeyCapture): the low-level hook
+// swallows every keystroke system-wide while armed, so it must never be
+// left waiting forever.
+constexpr UINT_PTR IDT_HK_CAPTURE = 5;
+constexpr int kHotkeyCaptureTimeoutMs = 10000;
+// Delay between a resume-from-sleep notification and the group restart.
+constexpr UINT_PTR IDT_RESUME = 6;
 constexpr UINT WM_TRAYICON = WM_APP + 1;
 constexpr UINT WM_DEVICES_CHANGED = WM_APP + 2;
+// Windows' default render endpoint changed (see DeviceNotificationClient).
+constexpr UINT WM_DEFAULT_CHANGED = WM_APP + 3;
 constexpr int HOTKEY_TOGGLE_GROUP = 1;   // Ctrl+Alt+G
 constexpr int HOTKEY_SETUP_SWITCHER = 2; // Ctrl+Alt+S
 // Ctrl+Shift+1..9 applies setup #1..9 directly. Ctrl+Alt+digit is off-limits:
@@ -111,8 +122,10 @@ bool EffectiveLightTheme() {
     return IsWindowsLightThemeEnabled();
 }
 
+// Must match ui.html's --bg for each theme (the host brush shows through
+// while the web content repaints after a resize).
 COLORREF WindowBgForTheme(bool light) {
-    return light ? RGB(0xF3, 0xF3, 0xF3) : RGB(0x0E, 0x10, 0x13);
+    return light ? RGB(0xD4, 0xD5, 0xD9) : RGB(0x0E, 0x10, 0x13);
 }
 
 struct OutputSettings {
@@ -126,6 +139,9 @@ struct OutputSettings {
     // reordered keep this default and sort after the arranged ones, in
     // enumeration order.
     int order = 1000000;
+    // System name last seen for this endpoint id -- the key for recognizing
+    // the same device back under a new id (see PopulateOutputList).
+    std::wstring name;
     // User-chosen display name; empty = show the system name. Cosmetic only,
     // deliberately not part of setups (renaming survives applying a preset).
     std::wstring alias;
@@ -227,6 +243,15 @@ int g_deviceFillMs = kDefaultDeviceFillMs;
 // Low-latency period toggle (IAudioClient3) -- see AudioEngine::setLowLatency
 // and the "lowlatency" web command. Persisted as [group]/lowlatency.
 bool g_lowLatency = false;
+// Ctrl+Maj+1..9 apply setup #1..9 directly -- optional, since those combos
+// are also used by Office, editors... (see UpdateSetupDigitHotkeys).
+bool g_setupDigitHotkeys = true;
+// Toasts (error/info JSON) posted while the main window was hidden: the
+// suspended page never saw them, so they are replayed by RestoreFromTray.
+std::vector<std::wstring> g_pendingJson;
+// When this app itself last changed Windows' default output: default-change
+// notifications inside that window are our own doing, not the user's.
+ULONGLONG g_lastDefaultChangeTick = 0;
 // Customizable global hotkeys (see FormatHotkey/RebindHotkey/LoadHotkeysFromIni).
 UINT g_toggleHotkeyMods = MOD_CONTROL | MOD_ALT;
 UINT g_toggleHotkeyVk = 'G';
@@ -254,6 +279,8 @@ std::wstring g_startupWarning;
 // first one's main window before exiting (see the single-instance guard in
 // RunApplication). RegisterWindowMessageW guarantees a system-wide unique id.
 UINT g_showAppMessage = 0;
+
+void ShowTrayBalloon(const std::wstring& text, DWORD iconFlag); // defined with the tray code below
 
 HBRUSH g_hBrushWindowBg = nullptr;
 HBRUSH g_optionsHBrushWindowBg = nullptr; // the Options window class's own background brush
@@ -353,9 +380,15 @@ public:
     HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR, DWORD) override { notify(); return S_OK; }
     HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR) override { notify(); return S_OK; }
     HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR) override { notify(); return S_OK; }
-    // Ignored: we change the default endpoint ourselves when starting or
-    // stopping a group -- reacting to it would refresh in a loop.
-    HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow, ERole, LPCWSTR) override { return S_OK; }
+    // Only the console render role matters: it is what a running group
+    // hijacks. Our own SetDefaultEndpoint calls come through here too; the
+    // handler filters them out by timestamp (see WM_DEFAULT_CHANGED).
+    HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR) override {
+        if (flow == eRender && role == eConsole && g_mainWnd) {
+            PostMessageW(g_mainWnd, WM_DEFAULT_CHANGED, 0, 0);
+        }
+        return S_OK;
+    }
     // Ignored: fires constantly (volume, jack info...), never list-relevant.
     HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR, const PROPERTYKEY) override { return S_OK; }
 
@@ -418,6 +451,8 @@ void SaveConfig() {
                                g_configPath.c_str());
     WritePrivateProfileStringW(L"hotkeys", L"switchervk", std::to_wstring(g_switcherHotkeyVk).c_str(),
                                g_configPath.c_str());
+    WritePrivateProfileStringW(L"hotkeys", L"setupdigits", g_setupDigitHotkeys ? L"1" : L"0",
+                               g_configPath.c_str());
     WritePrivateProfileStringW(L"setups", L"active", g_activeSetup.c_str(), g_configPath.c_str());
     WritePrivateProfileStringW(L"setups", L"editing", g_editingSetup.c_str(), g_configPath.c_str());
 
@@ -433,6 +468,7 @@ void SaveConfig() {
         }
         WritePrivateProfileStringW(section, L"muted", s.muted ? L"1" : L"0", g_configPath.c_str());
         WritePrivateProfileStringW(section, L"order", std::to_wstring(s.order).c_str(), g_configPath.c_str());
+        WritePrivateProfileStringW(section, L"name", s.name.c_str(), g_configPath.c_str());
         WritePrivateProfileStringW(section, L"alias", s.alias.c_str(), g_configPath.c_str());
         WritePrivateProfileStringW(section, L"color", s.colorHex.c_str(), g_configPath.c_str());
     }
@@ -480,6 +516,21 @@ void LoadHotkeysFromIni() {
     g_switcherHotkeyMods = GetPrivateProfileIntW(L"hotkeys", L"switchermods", MOD_CONTROL | MOD_ALT,
                                                  g_configPath.c_str());
     g_switcherHotkeyVk = GetPrivateProfileIntW(L"hotkeys", L"switchervk", 'S', g_configPath.c_str());
+    g_setupDigitHotkeys = GetPrivateProfileIntW(L"hotkeys", L"setupdigits", 1, g_configPath.c_str()) != 0;
+}
+
+// Ctrl+Maj+1..9 are only registered while they can do something (option on
+// AND at least one setup) -- a global hotkey that steals a combo from every
+// other app just to do nothing is the worst of both worlds. Re-run after
+// any change to the setup list or the option.
+void UpdateSetupDigitHotkeys(HWND hwnd) {
+    for (int i = 0; i < kSetupHotkeyCount; ++i) UnregisterHotKey(hwnd, HOTKEY_SETUP_FIRST + i);
+    if (!g_setupDigitHotkeys || g_setups.empty()) return;
+    int count = std::min(static_cast<int>(g_setups.size()), kSetupHotkeyCount);
+    for (int i = 0; i < count; ++i) {
+        RegisterHotKey(hwnd, HOTKEY_SETUP_FIRST + i, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
+                       static_cast<UINT>('1' + i));
+    }
 }
 
 // Swaps a live global hotkey for a new combo, restoring the previous one if
@@ -516,6 +567,9 @@ OutputSettings LoadDeviceSettings(const std::wstring& deviceId) {
     }
     s.muted = GetPrivateProfileIntW(section, L"muted", 0, g_configPath.c_str()) != 0;
     s.order = static_cast<int>(GetPrivateProfileIntW(section, L"order", 1000000, g_configPath.c_str()));
+    wchar_t nameBuf[256] = {};
+    GetPrivateProfileStringW(section, L"name", L"", nameBuf, 256, g_configPath.c_str());
+    s.name = nameBuf;
     wchar_t aliasBuf[128] = {};
     GetPrivateProfileStringW(section, L"alias", L"", aliasBuf, 128, g_configPath.c_str());
     s.alias = aliasBuf;
@@ -708,6 +762,7 @@ bool SetDefaultEndpointAllRoles(const std::wstring& deviceId) {
                                  reinterpret_cast<void**>(pc.GetAddressOf())))) {
         return false;
     }
+    g_lastDefaultChangeTick = GetTickCount64();
     bool ok = SUCCEEDED(pc->SetDefaultEndpoint(deviceId.c_str(), eConsole));
     pc->SetDefaultEndpoint(deviceId.c_str(), eMultimedia);
     // Without this, apps that pick their device via the communications role
@@ -724,17 +779,43 @@ std::wstring GetDefaultRenderId() {
     return L"";
 }
 
+// The default output we displaced when the group started is written to the
+// config the moment it changes: a crash mid-group would otherwise leave the
+// virtual cable as the default with no record of what to put back (see
+// RepairAfterCrash).
+void PersistPreviousDefault() {
+    if (g_configPath.empty()) return;
+    WritePrivateProfileStringW(L"group", L"previousdefault", g_previousDefaultId.c_str(),
+                               g_configPath.c_str());
+}
+
+// Puts Windows' default output back on preferredId -- or, if that device
+// is gone (unplugged since the group started) or refuses, on the first
+// physical output still present. Returns false only when nothing could be
+// restored at all, which leaves the cable as the default: a silent PC.
+bool RestoreDefaultRender(const std::wstring& preferredId) {
+    auto devices = g_deviceManager->enumerateRenderDevices();
+    bool present = false;
+    for (const auto& d : devices) {
+        if (d.id == preferredId) { present = true; break; }
+    }
+    if (present && SetDefaultEndpointAllRoles(preferredId)) return true;
+    for (const auto& d : devices) {
+        if (IsVirtualDevice(d.name)) continue;
+        if (SetDefaultEndpointAllRoles(d.id)) {
+            LOG_WARN(L"Sortie par défaut précédente introuvable — repli sur « " + d.name + L" ».");
+            return true;
+        }
+    }
+    LOG_ERROR(L"Impossible de restaurer une sortie par défaut : aucune sortie physique disponible.");
+    return false;
+}
+
 // --- Windows input level of capture endpoints (INPUTS tab) ---
 
 ComPtr<IAudioEndpointVolume> OpenEndpointVolume(const std::wstring& deviceId) {
-    ComPtr<IMMDeviceEnumerator> enumerator;
-    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
-                                 __uuidof(IMMDeviceEnumerator),
-                                 reinterpret_cast<void**>(enumerator.GetAddressOf())))) {
-        return {};
-    }
-    ComPtr<IMMDevice> device;
-    if (FAILED(enumerator->GetDevice(deviceId.c_str(), device.GetAddressOf()))) return {};
+    auto device = g_deviceManager->getDeviceById(deviceId);
+    if (!device) return {};
     ComPtr<IAudioEndpointVolume> volume;
     if (FAILED(device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr,
                                  reinterpret_cast<void**>(volume.GetAddressOf())))) {
@@ -921,6 +1002,18 @@ void UnrouteAllApps() {
     }
 }
 
+// Undoes everything a group start did to Windows: captured apps back on
+// their own output, the displaced default output restored (with a fallback
+// if it vanished). Every stop path -- clean stop, failed start, logoff,
+// exit -- ends here, so none of them can forget a step.
+void RestoreDefaultAndUnroute() {
+    UnrouteAllApps();
+    if (g_previousDefaultId.empty()) return;
+    RestoreDefaultRender(g_previousDefaultId);
+    g_previousDefaultId.clear();
+    PersistPreviousDefault();
+}
+
 // Apps currently holding a render session on any output device -- the
 // candidates for direct per-application capture. Keyed by their root
 // process, so Chrome's dozen per-tab sessions collapse into one entry.
@@ -986,12 +1079,30 @@ void SaveRoutedAppsToIni() {
     WritePrivateProfileStringW(L"routing", L"apps", list.c_str(), g_configPath.c_str());
 }
 
-// Startup repair: if a previous run died while apps were routed into the
-// cable, put every still-running instance of those executables back on the
-// default device. (An app not running keeps its stale route until it can be
-// resolved to a PID again -- unavoidable with this API.)
-void CleanupStaleRoutes() {
+// Startup repair after a previous run died mid-group (crash, taskkill):
+// - the default output it had displaced is put back if the cable is still
+//   the default (see PersistPreviousDefault);
+// - every still-running instance of the executables it had routed into the
+//   cable goes back on the default device. (An app not running keeps its
+//   stale route until it can be resolved to a PID again -- unavoidable with
+//   this API.)
+void RepairAfterCrash() {
     if (g_configPath.empty()) return;
+    wchar_t prevBuf[512] = {};
+    GetPrivateProfileStringW(L"group", L"previousdefault", L"", prevBuf, 512, g_configPath.c_str());
+    if (prevBuf[0]) {
+        std::wstring current = GetDefaultRenderId();
+        bool onCable = false;
+        for (const auto& d : g_deviceManager->enumerateRenderDevices()) {
+            if (d.id == current && IsCableDevice(d.name)) onCable = true;
+        }
+        if (onCable) {
+            LOG_WARN(L"Arrêt brutal détecté lors de la session précédente : restauration de la sortie par défaut.");
+            RestoreDefaultRender(prevBuf);
+        }
+        WritePrivateProfileStringW(L"group", L"previousdefault", L"", g_configPath.c_str());
+    }
+
     wchar_t buf[1024] = {};
     GetPrivateProfileStringW(L"routing", L"apps", L"", buf, 1024, g_configPath.c_str());
     std::wstring list = buf;
@@ -1030,14 +1141,68 @@ void SortOutputDevicesByOrder() {
                      });
 }
 
+// Endpoint ids are not stable for life: re-pairing a Bluetooth speaker or
+// moving a USB DAC to another port hands it a brand-new id, and all its
+// settings (latency, EQ, alias, color, setup membership) would silently
+// start over. When an unknown id shows up, look through the config for a
+// section whose last-seen name matches and whose own id is no longer
+// enumerated: same device, new id -- carry everything over.
+std::wstring FindOrphanSectionByName(const std::wstring& name, const std::set<std::wstring>& presentIds) {
+    if (g_configPath.empty() || name.empty()) return L"";
+    std::vector<wchar_t> names(32768);
+    DWORD len = GetPrivateProfileSectionNamesW(names.data(), static_cast<DWORD>(names.size()),
+                                               g_configPath.c_str());
+    if (len == 0) return L"";
+    for (const wchar_t* p = names.data(); *p; p += wcslen(p) + 1) {
+        std::wstring section = p;
+        if (section.rfind(L"{0.0.0.", 0) != 0) continue; // only endpoint sections
+        if (presentIds.count(section)) continue;
+        wchar_t nameBuf[256] = {};
+        GetPrivateProfileStringW(section.c_str(), L"name", L"", nameBuf, 256, g_configPath.c_str());
+        if (name == nameBuf) return section;
+    }
+    return L"";
+}
+
+void MigrateDeviceId(const std::wstring& oldId, const std::wstring& newId) {
+    g_settings[newId] = LoadDeviceSettings(oldId);
+    g_settings.erase(oldId);
+    for (auto& setup : g_setups) {
+        for (auto& [id, s] : setup.devices) {
+            if (id == oldId) id = newId;
+        }
+    }
+    WritePrivateProfileStringW(oldId.c_str(), nullptr, nullptr, g_configPath.c_str()); // drop the section
+    LOG_INFO(L"Périphérique reconnu sous un nouvel identifiant, réglages transférés : " + newId);
+}
+
 void PopulateOutputList() {
     g_outputDevices.clear();
-    for (auto& d : g_deviceManager->enumerateRenderDevices()) {
+    auto devices = g_deviceManager->enumerateRenderDevices();
+    std::set<std::wstring> presentIds;
+    for (const auto& d : devices) presentIds.insert(d.id);
+    bool migrated = false;
+    for (auto& d : devices) {
         if (IsVirtualDevice(d.name)) continue;
         if (g_settings.find(d.id) == g_settings.end()) {
-            g_settings[d.id] = LoadDeviceSettings(d.id);
+            OutputSettings s = LoadDeviceSettings(d.id);
+            bool knownSection = !s.name.empty();
+            if (!knownSection) {
+                std::wstring orphan = FindOrphanSectionByName(d.name, presentIds);
+                if (!orphan.empty()) {
+                    MigrateDeviceId(orphan, d.id);
+                    migrated = true;
+                    s = g_settings[d.id];
+                }
+            }
+            g_settings[d.id] = s;
         }
+        g_settings[d.id].name = d.name;
         g_outputDevices.push_back(d);
+    }
+    if (migrated) {
+        SaveConfig();
+        SaveSetupsToIni();
     }
     SortOutputDevicesByOrder();
 }
@@ -1107,6 +1272,7 @@ void SendState() {
                      L",\"deviceFillMsMin\":" + std::to_wstring(kMinDeviceFillMs) +
                      L",\"deviceFillMsMax\":" + std::to_wstring(kMaxDeviceFillMs) +
                      L",\"lowLatency\":" + BoolJson(g_lowLatency) +
+                     L",\"setupDigitHotkeys\":" + BoolJson(g_setupDigitHotkeys) +
                      L",\"optimizing\":" + BoolJson(g_optimizing) +
                      L",\"theme\":" + std::to_wstring(g_themeOverride) +
                      L",\"toggleHotkey\":\"" + JsonEscape(FormatHotkey(g_toggleHotkeyMods, g_toggleHotkeyVk)) +
@@ -1151,29 +1317,42 @@ void SendState() {
     j += L"],\"activeSetup\":\"" + JsonEscape(g_activeSetup) +
          L"\",\"editingSetup\":\"" + JsonEscape(g_editingSetup) +
          L"\",\"playingSetup\":\"" + JsonEscape(g_playingSetup) +
-         L"\",\"setupMic\":\"" + JsonEscape(g_setupMicId) + L"\",\"sources\":[";
-    auto sources = EnumerateSourceApps();
-    for (size_t i = 0; i < sources.size(); ++i) {
-        if (i) j += L',';
-        j += L"{\"pid\":" + std::to_wstring(sources[i].pid) +
-             L",\"name\":\"" + JsonEscape(sources[i].name) + L"\"}";
-    }
+         L"\",\"setupMic\":\"" + JsonEscape(g_setupMicId) + L"\"";
     // Physical capture devices, for the INPUTS tab and the mic-calibration
     // modal's input picker (virtual endpoints filtered out: a cable "mic"
     // can't hear a speaker, and shouldn't become anyone's default mic).
-    j += L"],\"inputs\":[";
+    // Their Windows level/mute is only read while the INPUTS tab is showing
+    // (g_micMetering): one COM activation per mic on every state resend is
+    // not worth it for a tab nobody is looking at.
+    j += L",\"inputs\":[";
     size_t inputCount = 0;
     for (const auto& d : g_deviceManager->enumerateCaptureDevices()) {
         if (IsVirtualDevice(d.name)) continue;
         if (inputCount++) j += L',';
         int micVol = 100;
         bool micMuted = false;
-        GetCaptureVolume(d.id, micVol, micMuted);
+        if (g_micMetering) GetCaptureVolume(d.id, micVol, micMuted);
         j += L"{\"id\":\"" + JsonEscape(d.id) +
              L"\",\"name\":\"" + JsonEscape(d.name) +
              L"\",\"default\":" + BoolJson(d.isDefault) +
              L",\"volume\":" + std::to_wstring(micVol) +
              L",\"muted\":" + BoolJson(micMuted) + L"}";
+    }
+    j += L"]}";
+    PostJson(j);
+}
+
+// Apps currently playing audio, for the speaker sheet's Source dropdown.
+// Deliberately not part of SendState: enumerating the audio sessions of
+// every device plus a process snapshot is too heavy to pay on every
+// checkbox click, so the page asks for it when it needs it ("sources").
+void SendSources() {
+    std::wstring j = L"{\"type\":\"sources\",\"sources\":[";
+    auto sources = EnumerateSourceApps();
+    for (size_t i = 0; i < sources.size(); ++i) {
+        if (i) j += L',';
+        j += L"{\"pid\":" + std::to_wstring(sources[i].pid) +
+             L",\"name\":\"" + JsonEscape(sources[i].name) + L"\"}";
     }
     j += L"]}";
     PostJson(j);
@@ -1268,12 +1447,36 @@ void SendCalStatus() {
     PostJson(j);
 }
 
+// Toasts posted while the main window is hidden never reach the (suspended)
+// page: keep them for the next RestoreFromTray, and surface errors through
+// a tray balloon right away so a failed autostart at logon isn't just lost.
+void RememberHiddenToast(const std::wstring& json, const std::wstring& balloonText) {
+    if (!g_mainWnd || IsWindowVisible(g_mainWnd)) return;
+    if (g_pendingJson.size() >= 10) g_pendingJson.erase(g_pendingJson.begin());
+    g_pendingJson.push_back(json);
+    if (!balloonText.empty()) ShowTrayBalloon(balloonText, NIIF_WARNING);
+}
+
 void SendError(const std::wstring& message) {
-    PostJson(L"{\"type\":\"error\",\"message\":\"" + JsonEscape(message) + L"\"}");
+    std::wstring j = L"{\"type\":\"error\",\"message\":\"" + JsonEscape(message) + L"\"}";
+    PostJson(j);
+    RememberHiddenToast(j, message);
 }
 
 void SendInfo(const std::wstring& message) {
-    PostJson(L"{\"type\":\"info\",\"message\":\"" + JsonEscape(message) + L"\"}");
+    std::wstring j = L"{\"type\":\"info\",\"message\":\"" + JsonEscape(message) + L"\"}";
+    PostJson(j);
+    RememberHiddenToast(j, L"");
+}
+
+// An error toast carrying one action button, which posts `command` back.
+void SendErrorWithAction(const std::wstring& message, const std::wstring& command,
+                         const std::wstring& label) {
+    std::wstring j = L"{\"type\":\"error\",\"message\":\"" + JsonEscape(message) +
+                     L"\",\"action\":\"" + JsonEscape(command) +
+                     L"\",\"actionLabel\":\"" + JsonEscape(label) + L"\"}";
+    PostJson(j);
+    RememberHiddenToast(j, message);
 }
 
 // --- Hotkey capture (native) ---
@@ -1301,6 +1504,7 @@ void StopHotkeyCapture() {
         UnhookWindowsHookEx(g_hotkeyCaptureHook);
         g_hotkeyCaptureHook = nullptr;
     }
+    if (g_mainWnd) KillTimer(g_mainWnd, IDT_HK_CAPTURE);
     g_hotkeyCaptureId = 0;
     g_hkCtrlDown = g_hkAltDown = g_hkShiftDown = g_hkWinDown = false;
 }
@@ -1376,6 +1580,9 @@ void StartHotkeyCapture(int id) {
         return;
     }
     g_hotkeyCaptureId = id;
+    // The hook eats every keystroke on the whole system until a combo
+    // completes it -- never leave it armed indefinitely (see IDT_HK_CAPTURE).
+    SetTimer(g_mainWnd, IDT_HK_CAPTURE, kHotkeyCaptureTimeoutMs, nullptr);
 }
 
 // --- Setup switcher popup (Ctrl+Alt+S) ---
@@ -1402,8 +1609,9 @@ struct Palette { COLORREF bg, border, text, muted, faint; };
 
 Palette CurrentPalette() {
     if (EffectiveLightTheme()) {
-        return { RGB(0xFF, 0xFF, 0xFF), RGB(0xDC, 0xDF, 0xE4), RGB(0x1B, 0x1D, 0x22),
-                 RGB(0x5B, 0x62, 0x70), RGB(0x9A, 0xA1, 0xAD) };
+        // ui.html light theme: --card, --border, --text, --muted, --faint.
+        return { RGB(0xDF, 0xE0, 0xE3), RGB(0xB8, 0xBB, 0xC1), RGB(0x1C, 0x1E, 0x23),
+                 RGB(0x52, 0x58, 0x64), RGB(0x7D, 0x81, 0x8B) };
     }
     return { RGB(0x15, 0x18, 0x1E), RGB(0x2A, 0x30, 0x3C), RGB(0xEC, 0xEE, 0xF2),
              RGB(0x98, 0xA0, 0xAE), RGB(0x5C, 0x63, 0x70) };
@@ -1846,6 +2054,7 @@ void OnCreateGroup(HWND hwnd) {
         if (g_previousDefaultId == cableRender->id) {
             g_previousDefaultId = outputs[0].deviceId;
         }
+        PersistPreviousDefault();
         SetDefaultEndpointAllRoles(cableRender->id);
     } else {
         // Pure app-sourced group: the real default device stays in place.
@@ -1870,8 +2079,7 @@ void OnCreateGroup(HWND hwnd) {
     if (!g_engine.start(sourceId, loopback, masterVolumeId, outputs, error)) {
         // Only the synchronous pre-checks (already running, nothing selected)
         // fail here; device negotiation itself now runs in the background.
-        UnrouteAllApps();
-        if (!g_previousDefaultId.empty()) SetDefaultEndpointAllRoles(g_previousDefaultId);
+        RestoreDefaultAndUnroute();
         SendError(error);
         return;
     }
@@ -1892,11 +2100,7 @@ void OnStop(HWND hwnd) {
     g_awaitingGroupStart = false;
     g_playingSetup.clear();
     g_engine.stop();
-    UnrouteAllApps(); // put captured apps back on their normal output
-    if (!g_previousDefaultId.empty()) {
-        SetDefaultEndpointAllRoles(g_previousDefaultId);
-        g_previousDefaultId.clear();
-    }
+    RestoreDefaultAndUnroute();
     SendState();
 }
 
@@ -1950,6 +2154,7 @@ void SaveSetupFromCurrent(std::wstring name) {
     g_activeSetup = name;
     g_editingSetup = name;
     SaveSetupsToIni();
+    UpdateSetupDigitHotkeys(g_mainWnd);
     SendState();
 }
 
@@ -2039,6 +2244,7 @@ void DeleteSetup(const std::wstring& name) {
     if (g_editingSetup == name) g_editingSetup.clear();
     if (g_playingSetup == name) g_playingSetup.clear();
     SaveSetupsToIni();
+    UpdateSetupDigitHotkeys(g_mainWnd);
     SendState();
 }
 
@@ -2177,6 +2383,20 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
         // engine keeps its own copies of everything.
         PopulateOutputList();
         SendState();
+        SendSources();
+        return;
+    }
+    if (cmd == L"sources") { SendSources(); return; }
+    if (cmd == L"reclaim") {
+        // The user answered the "audio left the group" toast: put the cable
+        // back as the default output. Only meaningful while a group holds it.
+        if (g_previousDefaultId.empty()) return;
+        for (const auto& d : g_deviceManager->enumerateRenderDevices()) {
+            if (!IsCableDevice(d.name)) continue;
+            if (SetDefaultEndpointAllRoles(d.id)) SendInfo(L"Le groupe a repris la sortie par défaut.");
+            else SendError(L"Impossible de redéfinir la sortie par défaut.");
+            return;
+        }
         return;
     }
     if (cmd == L"openoptions") { OpenOptionsWindow(g_mainWnd); return; }
@@ -2267,6 +2487,8 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
         g_lowLatency = false;
         g_engine.setLowLatency(false);
         if (g_engine.isRunning()) g_engine.resyncAllOutputs();
+        g_setupDigitHotkeys = true;
+        UpdateSetupDigitHotkeys(g_mainWnd);
         g_themeOverride = 0;
         ApplyWindowTheme(g_mainWnd);
         ApplyOptionsWindowTheme();
@@ -2291,6 +2513,13 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
     }
     if (cmd == L"cancelhotkeycapture") {
         StopHotkeyCapture();
+        SendState();
+        return;
+    }
+    if (cmd == L"setupdigits") {
+        g_setupDigitHotkeys = (rest == L"1");
+        UpdateSetupDigitHotkeys(g_mainWnd);
+        SaveConfig();
         SendState();
         return;
     }
@@ -2394,8 +2623,12 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
         // micmeter|0/1 -- VU metering for the INPUTS tab, on only while the
         // tab is actually visible: it holds open capture streams, which
         // lights the Windows "microphone in use" indicator.
-        if (rest == L"1") StartMicMetering();
-        else StopMicMetering();
+        if (rest == L"1") {
+            StartMicMetering();
+            SendState(); // the inputs' Windows level/mute are only read while metering
+        } else {
+            StopMicMetering();
+        }
         return;
     }
     if (cmd == L"identify") {
@@ -2468,6 +2701,10 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
 
     // Remaining commands: cmd|deviceId or cmd|deviceId|value. Device ids
     // (MMDevice endpoint ids) never contain '|'.
+    if (cmd != L"check" && cmd != L"mute" && cmd != L"channel" && cmd != L"volume" &&
+        cmd != L"latency" && cmd != L"commit") {
+        return; // unknown command: must not touch anything
+    }
     size_t p2 = rest.find(L'|');
     std::wstring deviceId = rest.substr(0, p2);
     std::wstring value = (p2 == std::wstring::npos) ? L"" : rest.substr(p2 + 1);
@@ -2704,6 +2941,14 @@ LRESULT CALLBACK OptionsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                          SWP_NOZORDER | SWP_NOACTIVATE);
             return 0;
         }
+        case WM_ACTIVATE:
+            // Alt-Tab away mid-capture: the hook would keep eating every
+            // keystroke for whatever app is now in front.
+            if (LOWORD(wParam) == WA_INACTIVE && g_hotkeyCaptureId) {
+                StopHotkeyCapture();
+                SendState();
+            }
+            return 0;
         case WM_CLOSE:
             CloseOptionsWindow();
             return 0;
@@ -2839,6 +3084,18 @@ void AddTrayIcon(HWND hwnd) {
     Shell_NotifyIconW(NIM_ADD, &g_trayIcon);
 }
 
+// Balloon/toast notification from the tray icon -- the only channel left
+// when the window is hidden. iconFlag: NIIF_INFO / NIIF_WARNING / NIIF_ERROR.
+void ShowTrayBalloon(const std::wstring& text, DWORD iconFlag) {
+    if (!g_trayIcon.hWnd) return;
+    NOTIFYICONDATAW nid = g_trayIcon;
+    nid.uFlags = NIF_INFO;
+    nid.dwInfoFlags = iconFlag;
+    wcscpy_s(nid.szInfoTitle, L"AudioLinker");
+    wcsncpy_s(nid.szInfo, text.c_str(), _TRUNCATE);
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
 void ShowTrayMenu(HWND hwnd) {
     POINT pt;
     GetCursorPos(&pt);
@@ -2866,6 +3123,33 @@ void ShowTrayMenu(HWND hwnd) {
     DestroyMenu(menu);
 }
 
+// --- Window placement (persisted as [window] x/y/w/h, the normal rect) ---
+
+void SaveWindowPlacement(HWND hwnd) {
+    if (g_configPath.empty()) return;
+    WINDOWPLACEMENT wp = { sizeof(wp) };
+    if (!GetWindowPlacement(hwnd, &wp)) return;
+    const RECT& r = wp.rcNormalPosition;
+    if (r.right <= r.left || r.bottom <= r.top) return;
+    WritePrivateProfileStringW(L"window", L"x", std::to_wstring(r.left).c_str(), g_configPath.c_str());
+    WritePrivateProfileStringW(L"window", L"y", std::to_wstring(r.top).c_str(), g_configPath.c_str());
+    WritePrivateProfileStringW(L"window", L"w", std::to_wstring(r.right - r.left).c_str(), g_configPath.c_str());
+    WritePrivateProfileStringW(L"window", L"h", std::to_wstring(r.bottom - r.top).c_str(), g_configPath.c_str());
+}
+
+// False if nothing usable was saved, or the saved rect no longer touches any
+// monitor (screen unplugged since) -- the caller then uses the defaults.
+bool LoadWindowPlacement(RECT& out) {
+    if (g_configPath.empty()) return false;
+    int w = static_cast<int>(GetPrivateProfileIntW(L"window", L"w", 0, g_configPath.c_str()));
+    int h = static_cast<int>(GetPrivateProfileIntW(L"window", L"h", 0, g_configPath.c_str()));
+    if (w < 200 || h < 150) return false;
+    int x = static_cast<int>(GetPrivateProfileIntW(L"window", L"x", 0, g_configPath.c_str()));
+    int y = static_cast<int>(GetPrivateProfileIntW(L"window", L"y", 0, g_configPath.c_str()));
+    out = { x, y, x + w, y + h };
+    return MonitorFromRect(&out, MONITOR_DEFAULTTONULL) != nullptr;
+}
+
 void RestoreFromTray(HWND hwnd) {
     ShowWindow(hwnd, SW_SHOW);
     ShowWindow(hwnd, SW_RESTORE);
@@ -2873,8 +3157,13 @@ void RestoreFromTray(HWND hwnd) {
     ResumeMainWebView();
     // Everything that changed while the window was hidden (setup switched by
     // hotkey, device hot-plugs...) was not posted to the page -- see
-    // PostJson -- so re-sync it now that someone can see it again.
+    // PostJson -- so re-sync it now that someone can see it again, then
+    // replay the toasts it missed.
     SendState();
+    if (g_webview) {
+        for (const auto& j : g_pendingJson) g_webview->PostWebMessageAsJson(j.c_str());
+    }
+    g_pendingJson.clear();
 }
 
 // --- Window ---
@@ -2911,7 +3200,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 static_cast<int>(GetPrivateProfileIntW(L"group", L"theme", 0, g_configPath.c_str())));
             LoadHotkeysFromIni();
             LoadSetupsFromIni();
-            CleanupStaleRoutes(); // repair app routing left over by a crash
+            RepairAfterCrash(); // default output + app routing left over by a crash
 
             PopulateOutputList();
             AddTrayIcon(hwnd);
@@ -2930,15 +3219,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 g_startupWarning += L"Le raccourci " + FormatHotkey(g_switcherHotkeyMods, g_switcherHotkeyVk) +
                                     L" (changer de setup) est déjà utilisé par une autre application.";
             }
-            for (int i = 0; i < kSetupHotkeyCount; ++i) {
-                RegisterHotKey(hwnd, HOTKEY_SETUP_FIRST + i, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
-                               static_cast<UINT>('1' + i));
-            }
+            UpdateSetupDigitHotkeys(hwnd);
             InitWebView(hwnd);
             return 0;
         }
         case WM_SIZE:
             if (wParam == SIZE_MINIMIZED) {
+                SaveWindowPlacement(hwnd);
                 ShowWindow(hwnd, SW_HIDE);
                 SuspendMainWebView();
             } else if (g_webviewController) {
@@ -3000,6 +3287,33 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             // debounce, the actual refresh happens once things settle.
             SetTimer(hwnd, IDT_DEVICE_REFRESH, 600, nullptr);
             return 0;
+        case WM_DEFAULT_CHANGED: {
+            // Somebody moved Windows' default output away from the cable
+            // (Sound settings, another switcher, a newly plugged device
+            // Windows promoted) while a group depends on it: the PC's audio
+            // just left the group, silently. Our own SetDefaultEndpoint
+            // calls land here too, hence the timestamp filter.
+            if (g_previousDefaultId.empty()) return 0; // no group holding the default
+            if (GetTickCount64() - g_lastDefaultChangeTick < 2000) return 0;
+            std::wstring current = GetDefaultRenderId();
+            for (const auto& d : g_deviceManager->enumerateRenderDevices()) {
+                if (d.id == current && IsCableDevice(d.name)) return 0; // still ours
+            }
+            LOG_WARN(L"La sortie par défaut a été changée hors d'AudioLinker pendant le groupe.");
+            SendErrorWithAction(L"Le son a quitté le groupe : Windows a changé de sortie par défaut.",
+                                L"reclaim", L"Reprendre");
+            return 0;
+        }
+        case WM_POWERBROADCAST:
+            // Back from sleep: every stream is stale (the retry loops would
+            // recover on their own, but a clean restart lands faster and
+            // re-establishes the cushions exactly). Delayed so the audio
+            // stack has finished waking up first.
+            if (wParam == PBT_APMRESUMEAUTOMATIC && (g_engine.isRunning() || g_engine.isStarting())) {
+                LOG_INFO(L"Reprise de veille : redémarrage du groupe dans 2 s.");
+                SetTimer(hwnd, IDT_RESUME, 2000, nullptr);
+            }
+            return TRUE;
         case WM_SETTINGCHANGE:
             // Windows broadcasts this with lParam == "ImmersiveColorSet" when
             // the user toggles Settings > Personnalisation > Couleurs > Mode.
@@ -3015,6 +3329,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             SendState();
             return 0;
         case WM_CLOSE:
+            SaveWindowPlacement(hwnd);
             ShowWindow(hwnd, SW_HIDE);
             SuspendMainWebView();
             return 0;
@@ -3038,10 +3353,27 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 PopulateOutputList();
                 if (g_micMetering) StartMicMetering(); // fresh mic set
                 SendState();
+                SendSources();
+                return 0;
+            }
+            if (wParam == IDT_RESUME) {
+                KillTimer(hwnd, IDT_RESUME);
+                if (g_engine.isRunning()) {
+                    OnStop(hwnd);
+                    OnCreateGroup(hwnd);
+                }
                 return 0;
             }
             if (wParam == IDT_OPT_TIMER) {
                 if (g_optimizing) OptimizerTick(hwnd);
+                return 0;
+            }
+            if (wParam == IDT_HK_CAPTURE) {
+                if (g_hotkeyCaptureId) {
+                    StopHotkeyCapture();
+                    SendInfo(L"Capture du raccourci annulée : aucune combinaison en 10 s.");
+                    SendState();
+                }
                 return 0;
             }
             if (wParam == IDT_CAL_TIMER) {
@@ -3099,11 +3431,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                         LOG_ERROR(L"Échec du démarrage du groupe : " + error);
                         g_statusTimerForGroup = false;
                         if (!g_micMetering) KillTimer(hwnd, IDT_STATUS_TIMER);
-                        UnrouteAllApps();
-                        if (!g_previousDefaultId.empty()) {
-                            SetDefaultEndpointAllRoles(g_previousDefaultId);
-                            g_previousDefaultId.clear();
-                        }
+                        g_playingSetup.clear();
+                        RestoreDefaultAndUnroute();
                         SendState();
                         SendError(error);
                         return 0;
@@ -3113,12 +3442,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     return 0;
                 }
                 SendStatus();
-                if (g_statusTimerForGroup && !g_engine.isRunning()) {
-                    // Engine stopped unexpectedly (e.g. device unplugged).
-                    // Guarded: without a group, the timer legitimately runs
-                    // for mic metering alone with an idle engine.
-                    OnStop(hwnd);
-                }
             }
             return 0;
         case WM_QUERYENDSESSION:
@@ -3130,17 +3453,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 if (g_engine.isRunning()) {
                     g_engine.stop();
                 }
-                UnrouteAllApps();
-                if (!g_previousDefaultId.empty()) {
-                    SetDefaultEndpointAllRoles(g_previousDefaultId);
-                    g_previousDefaultId.clear();
-                }
+                RestoreDefaultAndUnroute();
             }
             return 0;
         case WM_DESTROY:
             // Skipped after a config import: the imported file must reach
             // the relaunched instance untouched (see ImportConfig).
-            if (!g_skipSaveOnExit) SaveConfig();
+            if (!g_skipSaveOnExit) {
+                SaveConfig();
+                SaveWindowPlacement(hwnd);
+            }
             g_calibrator.cancel(); // its destructor joins the worker
             StopHotkeyCapture();
             CloseSwitcherHook();
@@ -3165,10 +3487,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             Shell_NotifyIconW(NIM_DELETE, &g_trayIcon);
             g_engine.stop();
-            UnrouteAllApps();
-            if (!g_previousDefaultId.empty()) {
-                SetDefaultEndpointAllRoles(g_previousDefaultId);
-            }
+            RestoreDefaultAndUnroute();
             if (g_webview) {
                 g_webview->remove_WebMessageReceived(g_webMessageToken);
                 g_webview.Reset();
@@ -3241,19 +3560,37 @@ int RunApplication(HINSTANCE hInstance, int nCmdShow, bool startHidden, bool wai
     wc.hIcon = g_hAppIcon;
     RegisterClassW(&wc);
 
-    // Per-monitor DPI aware: scale the default (logical-pixel) size by the
-    // system DPI for the initial creation; WM_DPICHANGED takes over if the
-    // window then lands on a monitor with a different scale.
-    UINT dpi = GetDpiForSystem();
-    if (dpi == 0) dpi = 96;
-    RECT r = { 0, 0, MulDiv(kDefaultClientW, static_cast<int>(dpi), 96),
-                     MulDiv(kDefaultClientH, static_cast<int>(dpi), 96) };
-    AdjustWindowRectExForDpi(&r, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_THICKFRAME,
-                             FALSE, 0, dpi);
+    // Where the window goes: its last saved placement if it still lands on a
+    // monitor, otherwise the default size scaled by the DPI of the monitor
+    // under the cursor (per-monitor DPI aware; WM_DPICHANGED takes over if
+    // the window is later dragged to a differently-scaled screen).
+    int x = CW_USEDEFAULT, y = CW_USEDEFAULT, w, h;
+    RECT saved;
+    if (LoadWindowPlacement(saved)) {
+        x = saved.left;
+        y = saved.top;
+        w = saved.right - saved.left;
+        h = saved.bottom - saved.top;
+    } else {
+        POINT cursor;
+        GetCursorPos(&cursor);
+        UINT dpi = 0, dpiY = 0;
+        if (FAILED(GetDpiForMonitor(MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY),
+                                    MDT_EFFECTIVE_DPI, &dpi, &dpiY)) || dpi == 0) {
+            dpi = GetDpiForSystem();
+        }
+        if (dpi == 0) dpi = 96;
+        RECT r = { 0, 0, MulDiv(kDefaultClientW, static_cast<int>(dpi), 96),
+                         MulDiv(kDefaultClientH, static_cast<int>(dpi), 96) };
+        AdjustWindowRectExForDpi(&r, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_THICKFRAME,
+                                 FALSE, 0, dpi);
+        w = r.right - r.left;
+        h = r.bottom - r.top;
+    }
     HWND hwnd = CreateWindowExW(0, className, L"AudioLinker — Groupe d'enceintes",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_THICKFRAME |
             WS_MAXIMIZEBOX | WS_CLIPCHILDREN,
-        CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left, r.bottom - r.top,
+        x, y, w, h,
         nullptr, nullptr, hInstance, nullptr);
     if (!hwnd) {
         g_deviceManager.reset();

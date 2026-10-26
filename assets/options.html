@@ -125,6 +125,12 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.05); }
     <button class="ghost-btn" id="hkSwitcherBtn"></button>
   </div>
   <div class="row">
+    <label class="switch"><input type="checkbox" id="setupDigits"><span class="track"></span></label>
+    <label class="switch-label" for="setupDigits"
+           title="Raccourcis globaux : ils ne sont actifs que si au moins un setup existe. Désactivez-les si une autre application en a besoin.">
+      Ctrl+Maj+1 à 9 : jouer directement le setup n°1 à 9</label>
+  </div>
+  <div class="row">
     <label>Marge anti-craquements</label>
     <input type="range" id="sCushion" min="30" max="800" step="10"
            title="Réserve interne absorbant les à-coups d'ordonnancement (charge CPU). Plus bas = moins de latence ; plus haut = plus de résistance aux craquements. Ne compense PAS les coupures radio Bluetooth.">
@@ -183,6 +189,7 @@ let state = {
   deviceFillMs: 60, deviceFillMsMin: 20, deviceFillMsMax: 150,
   lowLatency: false, optimizing: false, running: false, theme: 0,
   toggleHotkey: "Ctrl+Alt+G", switcherHotkey: "Ctrl+Alt+S", capturingHotkey: "",
+  setupDigitHotkeys: true,
 };
 
 // Cushion + device fill dominate the group's latency vs. native playback;
@@ -237,9 +244,14 @@ function renderAll() {
   const listening = "Ctrl/Alt/Maj/Win + une touche… (Échap pour annuler)";
   $("#hkToggleBtn").textContent = capturing === "toggle" ? listening : (state.toggleHotkey || "Ctrl+Alt+G");
   $("#hkSwitcherBtn").textContent = capturing === "switcher" ? listening : (state.switcherHotkey || "Ctrl+Alt+S");
+  $("#setupDigits").checked = state.setupDigitHotkeys !== false;
 
   $("#themeSelect").value = String(state.theme ?? 0);
 }
+
+$("#setupDigits").addEventListener("change", () => {
+  post("setupdigits|" + ($("#setupDigits").checked ? 1 : 0));
+});
 
 $("#autostart").addEventListener("change", () => {
   state.autostart = $("#autostart").checked;

@@ -42,6 +42,7 @@ target_link_libraries(AudioLinker PRIVATE
     version
     advapi32
     comdlg32 # GetSaveFileNameW/GetOpenFileNameW (Options: export/import config)
+    shcore # GetDpiForMonitor (initial window size on the cursor's monitor)
     mmdevapi # ActivateAudioInterfaceAsync (process-loopback capture)
     runtimeobject # RoGetActivationFactory/HSTRING (per-app endpoint routing)
     ${WEBVIEW2_NATIVE}/x64/WebView2LoaderStatic.lib

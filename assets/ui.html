@@ -256,6 +256,7 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
 .badge.src { color: var(--accent-2); border-color: rgba(var(--accent-rgb), 0.4); }
 
 .dev-right { flex: none; display: flex; align-items: center; gap: 10px; width: 120px; }
+.dev-right.wide { width: auto; } /* inputs rows: slider + value + mute + VU */
 .act-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); flex: none; transition: background 0.3s; }
 .device.active .act-dot { background: var(--green); box-shadow: 0 0 6px rgba(61, 220, 132, 0.7); }
 .vu { flex: 1; height: 6px; border-radius: 3px; background: var(--track-off); overflow: hidden; }
@@ -436,7 +437,8 @@ footer kbd {
   opacity: 0; pointer-events: none; transition: opacity 0.25s, transform 0.25s;
 }
 #toast.ok { background: #182a20; border-color: rgba(61, 220, 132, 0.5); color: #c9f5dc; }
-#toast.show { opacity: 1; transform: translate(-50%, 0); }
+#toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+#toast .toast-action { margin-left: 14px; color: inherit; border-color: currentColor; padding: 4px 10px; }
 </style>
 </head>
 <body>
@@ -886,9 +888,16 @@ function renderInputs() {
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.checked = inp.id === state.setupMic;
-    // The row's click handler does the work (backend confirms via a state
-    // resend); the input only drives the .box visual, so block its toggle.
-    cb.addEventListener("click", ev => ev.preventDefault());
+    // Only the radio changes the Windows default mic (the backend confirms
+    // via a state resend, so the input's own toggle is blocked): a click
+    // anywhere else on the row -- to look at the VU, say -- must not switch
+    // the mic of every app on the PC.
+    cb.addEventListener("click", ev => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      post(`setupmic|${inp.id}`);
+      markModified();
+    });
     const box = document.createElement("span");
     box.className = "box";
     chk.append(cb, box);
@@ -917,7 +926,7 @@ function renderInputs() {
     main.append(nameRow, meta);
 
     const right = document.createElement("div");
-    right.className = "dev-right";
+    right.className = "dev-right wide";
 
     const vol = document.createElement("input");
     vol.type = "range";
@@ -957,10 +966,6 @@ function renderInputs() {
 
     right.append(vol, val, mute, vu);
     row.append(chk, main, right);
-    row.addEventListener("click", () => {
-      post(`setupmic|${inp.id}`);
-      markModified();
-    });
     list.appendChild(row);
     inputRowRefs.set(inp.id, { row, fill });
     paintRange(vol);
@@ -1160,6 +1165,7 @@ function selectDevice(id) {
   for (const [did, r] of rowRefs) r.row.classList.toggle("sel", did === id);
   renderEqCard();
   announceSpectrumTarget();
+  if (id) requestSources(); // the sheet's Source dropdown wants a fresh list
 }
 
 // Tells the engine which output (if any) needs its 10-band spectrum
@@ -1415,9 +1421,21 @@ function renderAll() {
 
 // ---------- Per-speaker source (selected in the EQ panel) ----------
 
+// Apps currently playing audio -- fetched on demand ("sources" command,
+// answered by a "sources" message) rather than carried by every state
+// message: enumerating them is the single most expensive thing the native
+// side does, and the list is only needed when a speaker sheet is open.
+let sources = [];
+let sourcesRequested = false;
+
+function requestSources() {
+  sourcesRequested = true;
+  post("sources");
+}
+
 function sourceLabel(pid) {
   if (!pid) return "Tout le système";
-  const s = (state.sources || []).find(x => x.pid === pid);
+  const s = sources.find(x => x.pid === pid);
   return s ? s.name : `PID ${pid}`;
 }
 
@@ -1431,7 +1449,7 @@ function populateSourceOptions(d) {
     sel.appendChild(opt);
   };
   addOpt("Tout le système", 0);
-  const apps = state.sources || [];
+  const apps = sources;
   for (const s of apps) addOpt(s.name, s.pid);
   if (d.sourcePid && !apps.some(s => s.pid === d.sourcePid)) {
     addOpt(`PID ${d.sourcePid}`, d.sourcePid);
@@ -1843,13 +1861,23 @@ for (const m of document.querySelectorAll(".modal")) {
 // ---------- Toast ----------
 
 let toastTimer = 0;
-function toast(msg, kind) {
+// action: optional {cmd, label} -- a button inside the toast that posts
+// `cmd` to the native side (e.g. "Reprendre" when the default output was
+// changed behind the group's back).
+function toast(msg, kind, action) {
   const t = $("#toast");
   t.textContent = msg;
+  if (action) {
+    const btn = document.createElement("button");
+    btn.className = "ghost-btn toast-action";
+    btn.textContent = action.label;
+    btn.addEventListener("click", () => { post(action.cmd); t.classList.remove("show"); });
+    t.appendChild(btn);
+  }
   t.classList.toggle("ok", kind === "ok");
   t.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove("show"), 6000);
+  toastTimer = setTimeout(() => t.classList.remove("show"), action ? 15000 : 6000);
 }
 
 // ---------- Bridge ----------
@@ -1863,12 +1891,18 @@ if (bridge) {
       applyAccent(m.accent);
       applyTheme(m.theme);
       renderAll();
+      if (!sourcesRequested) requestSources(); // once, so the ♪ badges have names
     } else if (m.type === "status") {
       applyStatus(m);
+    } else if (m.type === "sources") {
+      sources = m.sources || [];
+      for (const d of state.devices) updateBadges(d);
+      const live = device(selectedId);
+      if (live) populateSourceOptions(live);
     } else if (m.type === "cal") {
       applyCal(m);
     } else if (m.type === "error") {
-      toast(m.message);
+      toast(m.message, "", m.action ? { cmd: m.action, label: m.actionLabel || "OK" } : null);
     } else if (m.type === "info") {
       toast(m.message, "ok");
     }
