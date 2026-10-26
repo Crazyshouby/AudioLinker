@@ -118,6 +118,7 @@ std::string SerializeConfig(const AppConfig& cfg) {
     g["deviceFillMs"] = cfg.deviceFillMs;
     g["lowLatency"] = cfg.lowLatency;
     g["theme"] = cfg.theme;
+    g["captureMode"] = cfg.captureMode;
     g["previousDefault"] = ToUtf8(cfg.previousDefault);
 
     json& h = j["hotkeys"];
@@ -183,6 +184,7 @@ bool ParseConfig(const std::string& text, AppConfig& cfg) {
         c.deviceFillMs = ClampDeviceFillMs(Get(*g, "deviceFillMs", kDefaultDeviceFillMs));
         c.lowLatency = Get(*g, "lowLatency", false);
         c.theme = ClampThemeOverride(Get(*g, "theme", 0));
+        c.captureMode = Get(*g, "captureMode", 0) == 1 ? 1 : 0;
         c.previousDefault = GetW(*g, "previousDefault");
     }
     if (auto h = j.find("hotkeys"); h != j.end() && h->is_object()) {

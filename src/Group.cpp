@@ -127,6 +127,53 @@ void OnCreateGroup(HWND hwnd) {
         SendState();
     }
 
+    std::wstring sourceId;
+    bool loopback = true;
+    std::wstring masterVolumeId;
+    g_nativeReferenceId.clear();
+
+    // --- Experimental "no cable" mode (see Config::captureMode) ---
+    // The system source is a process-loopback capture of everything but
+    // this app; Windows keeps playing on its real default output, which is
+    // therefore left out of the group and becomes the timing reference.
+    // Per-app sources are impossible here: without a cable to route the
+    // app into, it would play twice (natively and through the group).
+    if (g_cfg.captureMode == 1) {
+        if (!appPids.empty()) {
+            SendError(L"Mode sans câble : les sources par application ne sont pas disponibles "
+                      L"(l'application jouerait deux fois). Remettez-les sur « Tout le système ».");
+            return;
+        }
+        std::wstring defaultId = GetDefaultRenderId();
+        std::vector<OutputLinkConfig> kept;
+        for (const auto& o : outputs) {
+            if (o.deviceId == defaultId) g_nativeReferenceId = defaultId;
+            else kept.push_back(o);
+        }
+        if (kept.empty()) {
+            SendError(L"Mode sans câble : cochez au moins une enceinte autre que la sortie par défaut "
+                      L"de Windows (celle-ci joue déjà en natif et sert de référence).");
+            return;
+        }
+        outputs.swap(kept);
+        masterVolumeId = defaultId; // follow the real default's volume so levels match native playback
+        g_previousDefaultId.clear(); // nothing displaced
+        LOG_INFO(L"Démarrage du groupe « " + groupName + L" » SANS CÂBLE : " + std::to_wstring(outputs.size()) +
+                 L" sortie(s) + lecture native sur la sortie par défaut.");
+        std::wstring error;
+        if (!g_engine.start(L"", false, masterVolumeId, outputs, error, /*systemExcludeSelf=*/true)) {
+            SendError(error);
+            return;
+        }
+        g_playingSetup = g_activeSetup;
+        g_awaitingGroupStart = true;
+        g_statusTimerForGroup = true;
+        UpdateMeterTimers();
+        SendBanner(L"");
+        SendState();
+        return;
+    }
+
     // The cable is always needed: sink for the system-wide capture and/or
     // silent sink the captured apps are routed into (see SetAppRenderEndpoint
     // -- their audio must land somewhere inaudible, and muting is not an
@@ -142,9 +189,6 @@ void OnCreateGroup(HWND hwnd) {
         return;
     }
 
-    std::wstring sourceId;
-    bool loopback = true;
-    std::wstring masterVolumeId;
     if (needSystemSource) {
         for (auto& d : g_deviceManager->enumerateCaptureDevices()) {
             if (IsCableDevice(d.name)) {
@@ -213,6 +257,7 @@ void OnStop(HWND hwnd) {
     if (g_optimizing) { KillTimer(hwnd, IDT_OPT_TIMER); g_optimizing = false; }
     g_awaitingGroupStart = false;
     g_playingSetup.clear();
+    g_nativeReferenceId.clear();
     // Threads are torn down in the background; Windows is put back in
     // order right away (neither step needs the other).
     g_engine.stopAsync();
@@ -237,6 +282,15 @@ void BeginMicCalibration(HWND hwnd, const std::wstring& micId) {
     std::vector<std::wstring> ids;
     for (const auto& d : g_outputDevices) {
         if (g_settings[d.id].checked) ids.push_back(d.id);
+    }
+    // "No cable" mode: the real default output is part of the measurement
+    // too (it is the timing reference the group outputs must catch up with
+    // -- see the alignment in IDT_CAL_TIMER).
+    if (g_cfg.captureMode == 1) {
+        std::wstring defaultId = GetDefaultRenderId();
+        if (!defaultId.empty() && std::find(ids.begin(), ids.end(), defaultId) == ids.end()) {
+            ids.push_back(defaultId);
+        }
     }
     if (ids.size() < 2) {
         SendError(L"Cochez au moins deux enceintes à caler entre elles.");

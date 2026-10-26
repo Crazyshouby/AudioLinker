@@ -72,6 +72,16 @@ h3.sec:first-child { margin-top: 0; }
       Optimiser la latence automatiquement</button>
   </div>
 
+  <h3 class="sec">Capture du son</h3>
+  <div class="row">
+    <label>Mode</label>
+    <select class="ghost-btn" id="captureMode" style="flex:1">
+      <option value="0">Câble virtuel VB-CABLE (recommandé)</option>
+      <option value="1">Sans câble (expérimental)</option>
+    </select>
+  </div>
+  <div class="help" id="captureHelp"></div>
+
   <h3 class="sec">Apparence</h3>
   <div class="row">
     <label>Thème</label>
@@ -156,7 +166,19 @@ function renderAll() {
   $("#setupDigits").checked = state.setupDigitHotkeys !== false;
 
   $("#themeSelect").value = String(state.theme ?? 0);
+  $("#captureMode").value = String(state.captureMode ?? 0);
+  $("#captureHelp").textContent = (state.captureMode ?? 0) === 1
+    ? "Sans câble : le son est capturé directement (toutes les applications sauf AudioLinker) et la sortie " +
+      "par défaut de Windows continue de jouer en natif, hors du groupe, comme référence. Le groupe arrive " +
+      "forcément après elle (marge + tampon) : lancez le calage micro pour mesurer l'écart et savoir si votre " +
+      "configuration permet la synchronisation. Pas de sources par application dans ce mode."
+    : "Câble virtuel : le groupe devient la sortie par défaut de Windows ; toutes les enceintes, y compris " +
+      "celle qui était par défaut, sont synchronisées entre elles.";
 }
+
+$("#captureMode").addEventListener("change", () => {
+  post("capturemode|" + $("#captureMode").value);
+});
 
 $("#setupDigits").addEventListener("change", () => {
   post("setupdigits|" + ($("#setupDigits").checked ? 1 : 0));

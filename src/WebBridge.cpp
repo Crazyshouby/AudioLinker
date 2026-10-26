@@ -61,6 +61,8 @@ void SendState() {
     j["setupDigitHotkeys"] = g_setupDigitHotkeys;
     j["optimizing"] = g_optimizing;
     j["groupMuted"] = g_groupMuted;
+    j["captureMode"] = g_cfg.captureMode;
+    j["nativeReferenceId"] = U8(g_nativeReferenceId);
     j["theme"] = g_themeOverride;
     j["toggleHotkey"] = U8(FormatHotkey(g_toggleHotkeyMods, g_toggleHotkeyVk));
     j["switcherHotkey"] = U8(FormatHotkey(g_switcherHotkeyMods, g_switcherHotkeyVk));
@@ -407,6 +409,18 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
         SaveConfig();
         // Only takes effect on the next group start (the period is fixed at
         // stream init) -- restart a running group so the change is live now.
+        if (g_engine.isRunning()) {
+            OnStop(hwnd);
+            OnCreateGroup(hwnd);
+        }
+        SendState();
+        return;
+    }
+    if (cmd == L"capturemode") {
+        // capturemode|0/1 -- virtual cable / experimental no-cable. Takes
+        // effect at the next group start; a running group is restarted.
+        g_cfg.captureMode = (rest == L"1") ? 1 : 0;
+        SaveConfig();
         if (g_engine.isRunning()) {
             OnStop(hwnd);
             OnCreateGroup(hwnd);

@@ -181,7 +181,7 @@ AudioEngine::~AudioEngine() {
 bool AudioEngine::start(const std::wstring& sourceId, bool sourceIsLoopback,
                          const std::wstring& masterVolumeDeviceId,
                          const std::vector<OutputLinkConfig>& outputConfigs,
-                         std::wstring& errorOut) {
+                         std::wstring& errorOut, bool systemExcludeSelf) {
     if (stopping_.load()) {
         errorOut = L"Le moteur est en cours d'arrêt.";
         return false;
@@ -219,6 +219,7 @@ bool AudioEngine::start(const std::wstring& sourceId, bool sourceIsLoopback,
         }
     }
 
+    systemExcludeSelf_ = systemExcludeSelf;
     running_ = true;
     starting_ = true;
     hasStartError_ = false;
@@ -749,12 +750,12 @@ void AudioEngine::captureThreadProc(std::wstring sourceId, bool loopback, std::w
         // Mid-session loss: only THIS source's outputs go quiet (silence +
         // « source perdue » in the UI); the rest of the group keeps playing.
         markSourceLost(sourcePid, true);
-        if (processMode && !ProcessStillAlive(sourcePid)) {
+        if (sourcePid != 0 && !ProcessStillAlive(sourcePid)) {
             LOG_WARN(L"L'application capturée (PID " + std::to_wstring(sourcePid) +
                      L") s'est terminée : ses sorties passent en silence, le reste du groupe continue.");
             break; // a PID never comes back -- stays marked until stop()
         }
-        LOG_WARN(processMode
+        LOG_WARN(sourcePid != 0
             ? L"Capture de l'application (PID " + std::to_wstring(sourcePid) +
                   L") perdue — nouvelle tentative dans 2 s."
             : L"Capture système perdue — nouvelle tentative dans 2 s.");
@@ -774,7 +775,11 @@ AudioEngine::CaptureSessionEnd AudioEngine::runCaptureSession(
     ComPtr<IAudioCaptureClient> captureClient;
     StreamFormat srcFmt;
     HANDLE captureEvent = nullptr;
-    const bool processMode = (sourcePid != 0);
+    // Process loopback serves two sources: one app's tree (sourcePid), or --
+    // "no cable" mode -- everything except this process's own tree, which
+    // is how the whole system can be captured without a virtual device.
+    const bool excludeSelf = (sourcePid == 0 && systemExcludeSelf_);
+    const bool processMode = (sourcePid != 0) || excludeSelf;
     bool ok = false;
 
     // Process loopback has no GetMixFormat -- the caller dictates the format.
@@ -795,9 +800,11 @@ AudioEngine::CaptureSessionEnd AudioEngine::runCaptureSession(
             // process-loopback device (Windows 10 2004+).
             AUDIOCLIENT_ACTIVATION_PARAMS activationParams = {};
             activationParams.ActivationType = AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK;
-            activationParams.ProcessLoopbackParams.TargetProcessId = static_cast<DWORD>(sourcePid);
-            activationParams.ProcessLoopbackParams.ProcessLoopbackMode =
-                PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE;
+            activationParams.ProcessLoopbackParams.TargetProcessId =
+                excludeSelf ? GetCurrentProcessId() : static_cast<DWORD>(sourcePid);
+            activationParams.ProcessLoopbackParams.ProcessLoopbackMode = excludeSelf
+                ? PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE
+                : PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE;
             PROPVARIANT activateParams = {};
             activateParams.vt = VT_BLOB;
             activateParams.blob.cbSize = sizeof(activationParams);
@@ -844,9 +851,10 @@ AudioEngine::CaptureSessionEnd AudioEngine::runCaptureSession(
     } while (false);
 
     if (!ok) {
-        LOG_ERROR(processMode
+        LOG_ERROR(sourcePid != 0
             ? L"Capture par application (PID " + std::to_wstring(sourcePid) + L") impossible à démarrer."
-            : L"Capture système (câble virtuel) impossible à démarrer.");
+            : excludeSelf ? L"Capture système sans câble (process loopback) impossible à démarrer."
+                          : L"Capture système (câble virtuel) impossible à démarrer.");
         if (captureEvent) CloseHandle(captureEvent);
         if (firstSession) reportCaptureInit(false);
         return CaptureSessionEnd::InitFailed;

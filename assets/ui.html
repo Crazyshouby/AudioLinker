@@ -740,7 +740,11 @@ function renderList() {
     const bLag = document.createElement("span"); bLag.className = "badge lag"; bLag.hidden = true;
     bLag.title = "Retard mesuré entre l'envoi et la lecture par le périphérique (tampon Windows + pilote/Bluetooth)";
     const bGl = document.createElement("span"); bGl.className = "badge glitch"; bGl.hidden = true;
-    meta.append(bCh, bVol, bLat, bSrc, bLag, bGl);
+    const bRef = document.createElement("span"); bRef.className = "badge default";
+    bRef.textContent = "référence native";
+    bRef.title = "Mode sans câble : cette sortie est la sortie par défaut de Windows, elle joue en natif hors du groupe et sert de référence de temps";
+    bRef.hidden = d.id !== state.nativeReferenceId;
+    meta.append(bCh, bVol, bLat, bSrc, bLag, bGl, bRef);
     main.append(nameRow, meta);
 
     const idBtn = document.createElement("button");

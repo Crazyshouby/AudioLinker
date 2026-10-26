@@ -123,6 +123,7 @@ bool g_micMetering = false;
 // only runs for mic metering" (idle engine is normal).
 bool g_statusTimerForGroup = false;
 bool g_groupMuted = false;
+std::wstring g_nativeReferenceId;
 // Mirrors AudioEngine's base ring-buffer cushion (kDefaultBaseCushionMs) so
 // it can be edited from the UI and persisted -- see the "cushion"/
 // "cushioncommit" web commands.

@@ -80,6 +80,11 @@ struct AppConfig {
     int deviceFillMs = kDefaultDeviceFillMs;
     bool lowLatency = false;
     int theme = 0; // 0 = follow Windows, 1 = light, 2 = dark
+    // 0 = virtual cable (the group becomes Windows' default output);
+    // 1 = experimental "no cable": system audio captured by process
+    // loopback excluding this app, the real default output keeps playing
+    // natively and serves as the timing reference (see README).
+    int captureMode = 0;
     // Default output displaced by a running group -- non-empty only while
     // one runs, so a crash leaves a record of what to restore.
     std::wstring previousDefault;

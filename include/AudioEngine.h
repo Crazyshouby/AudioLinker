@@ -119,10 +119,14 @@ public:
     // muting is NOT an option, the loopback tap sits after session volume.
     // sourceId/masterVolumeDeviceId may be empty when no output uses the
     // system source.
+    // systemExcludeSelf (experimental "no virtual cable" mode): the system
+    // source is a process-loopback capture of every process except this
+    // one, instead of the device sourceId -- Windows keeps playing on its
+    // real default output, which the caller leaves out of the group.
     bool start(const std::wstring& sourceId, bool sourceIsLoopback,
                const std::wstring& masterVolumeDeviceId,
                const std::vector<OutputLinkConfig>& outputConfigs,
-               std::wstring& errorOut);
+               std::wstring& errorOut, bool systemExcludeSelf = false);
     void stop();
     // Non-blocking stop: the threads are torn down on a helper thread (a
     // WASAPI Stop on a Bluetooth device can take hundreds of ms, during
@@ -291,6 +295,7 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> starting_{false};
     std::atomic<bool> stopping_{false};
+    bool systemExcludeSelf_ = false; // see start(); fixed for the session
     std::thread starterThread_;
     std::thread stopperThread_; // see stopAsync()
     std::vector<std::thread> captureThreads_; // one per distinct source

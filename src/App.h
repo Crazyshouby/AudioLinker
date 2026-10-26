@@ -149,6 +149,9 @@ extern bool g_statusTimerForGroup;
 // mute, never persisted -- a quick "shut up" that survives neither a
 // restart of the app nor a setup change.
 extern bool g_groupMuted;
+// "No cable" mode, while a group runs: the real default output, left out of
+// the group and playing natively (empty otherwise). The page tags its row.
+extern std::wstring g_nativeReferenceId;
 extern int& g_baseCushionMs;
 extern int& g_deviceFillMs;
 extern bool& g_lowLatency;

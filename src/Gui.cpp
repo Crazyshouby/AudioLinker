@@ -440,6 +440,46 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     auto snap = g_calibrator.snapshot();
                     if (!snap.error.empty()) {
                         SendError(snap.error);
+                    } else if (!snap.cancelled && g_cfg.captureMode == 1) {
+                        // "No cable" mode: the real default output plays natively,
+                        // the group outputs reach the ear after the whole pipeline
+                        // (capture + cushion + device fill) plus their own delay.
+                        // latency_i = defaultDelay - pipeline - delay_i; a negative
+                        // value means the native output leads by more than the
+                        // pipeline can absorb -- the physical limit of this mode,
+                        // reported as the measured deficit (go / no-go data).
+                        std::wstring defaultId = GetDefaultRenderId();
+                        int defaultDelay = -1, okCount = 0;
+                        for (const auto& o : snap.outcomes) {
+                            if (o.state == CalState::Done && o.deviceId == defaultId) defaultDelay = o.delayMs;
+                        }
+                        if (defaultDelay < 0) {
+                            SendError(L"Calage sans câble : la sortie par défaut (référence) n'a pas pu être mesurée.");
+                        } else {
+                            const int pipelineMs = g_baseCushionMs + g_deviceFillMs + 20;
+                            int worstDeficit = 0;
+                            for (const auto& o : snap.outcomes) {
+                                if (o.state != CalState::Done || o.deviceId == defaultId) continue;
+                                ++okCount;
+                                int wanted = defaultDelay - pipelineMs - o.delayMs;
+                                if (wanted < 0) worstDeficit = std::max(worstDeficit, -wanted);
+                                g_settings[o.deviceId].latencyMs = ClampLatencyMs(std::max(0, wanted));
+                            }
+                            g_activeSetup.clear();
+                            SaveConfig();
+                            SendState();
+                            if (okCount == 0) {
+                                SendError(L"Calage sans câble : aucune enceinte du groupe n'a pu être mesurée.");
+                            } else if (worstDeficit > 0) {
+                                SendError(L"Calage sans câble : la sortie par défaut a " + std::to_wstring(worstDeficit) +
+                                          L" ms d'avance que le groupe ne peut pas rattraper (latences mises à 0). "
+                                          L"Baissez la marge et le tampon, ou prenez une sortie par défaut plus lente.");
+                            } else {
+                                SendInfo(L"Calage sans câble appliqué : groupe aligné sur la sortie par défaut (" +
+                                         std::to_wstring(defaultDelay) + L" ms mesurés, pipeline ≈ " +
+                                         std::to_wstring(pipelineMs) + L" ms).");
+                            }
+                        }
                     } else if (!snap.cancelled) {
                         // Align every measured output on the slowest one --
                         // same principle as the deviceLagMs-based autolatency,
