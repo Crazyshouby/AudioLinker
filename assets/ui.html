@@ -11,9 +11,8 @@
 header { display: flex; align-items: center; gap: 14px; flex: none; }
 .logo {
   width: 40px; height: 40px; border-radius: 12px; flex: none;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  background: var(--accent);
   display: grid; place-items: center;
-  box-shadow: 0 4px 18px var(--accent-glow);
 }
 .logo svg { width: 22px; height: 22px; }
 .brand { flex: 1; min-width: 0; }
@@ -21,24 +20,25 @@ header { display: flex; align-items: center; gap: 14px; flex: none; }
 .status { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); margin-top: 1px; }
 .status .dot {
   width: 8px; height: 8px; border-radius: 50%; background: var(--faint);
-  transition: background 0.3s, box-shadow 0.3s;
+  transition: background 0.3s;
 }
-.status.on .dot { background: var(--green); box-shadow: 0 0 8px rgba(61, 220, 132, 0.7); }
-.status.busy .dot { background: var(--warn); box-shadow: 0 0 8px rgba(232, 163, 61, 0.6); animation: pulse 1s ease-in-out infinite; }
+.status.on .dot { background: var(--green); }
+.status.busy .dot { background: var(--warn); animation: pulse 1s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.35; } }
 
+/* The one primary action: flat accent while stopped, neutral while running
+   (stopping is the quiet, deliberate gesture). */
 #toggleBtn {
-  position: relative; border: 0; border-radius: 12px; padding: 11px 22px;
+  position: relative; border: 1px solid transparent; border-radius: 10px; padding: 10px 22px;
   font: 600 14px "Segoe UI Variable Text", "Segoe UI", sans-serif; color: #fff;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  cursor: pointer; transition: transform 0.12s, box-shadow 0.2s, filter 0.2s;
-  box-shadow: 0 4px 16px var(--accent-glow);
+  background: var(--accent);
+  cursor: pointer; transition: background 0.15s, border-color 0.15s, filter 0.15s;
 }
-#toggleBtn:hover { transform: translateY(-1px); box-shadow: 0 6px 22px var(--accent-glow); }
-#toggleBtn:active { transform: translateY(0); filter: brightness(0.92); }
-#toggleBtn:disabled { cursor: default; filter: saturate(0.4) brightness(0.75); transform: none; }
-#toggleBtn.stop { background: linear-gradient(135deg, #3a3f4d, #2c303b); box-shadow: none; }
-#toggleBtn.stop:hover { filter: brightness(1.15); }
+#toggleBtn:hover { filter: brightness(1.12); }
+#toggleBtn:active { filter: brightness(0.92); }
+#toggleBtn:disabled { cursor: default; filter: saturate(0.4) brightness(0.8); }
+#toggleBtn.stop { background: var(--card-2); border-color: var(--border); color: var(--text); }
+#toggleBtn.stop:hover { filter: none; border-color: var(--accent); }
 #toggleBtn .spin {
   display: none; width: 13px; height: 13px; border-radius: 50%;
   border: 2px solid rgba(255,255,255,0.35); border-top-color: #fff;
@@ -51,7 +51,7 @@ header { display: flex; align-items: center; gap: 14px; flex: none; }
    -- unlike a toast, it stays as long as the condition does. */
 #banner {
   display: flex; align-items: center; gap: 12px; flex: none;
-  background: rgba(232, 163, 61, 0.12); border: 1px solid rgba(232, 163, 61, 0.45);
+  background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--warn);
   color: var(--text); border-radius: 10px; padding: 8px 14px; font-size: 13px;
 }
 #banner[hidden] { display: none; }
@@ -121,7 +121,9 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
 }
 .device:hover { background: var(--card-2); }
 .device:focus-visible { border-color: var(--accent); }
-.device.sel { background: rgba(var(--dev-color-rgb, var(--accent-rgb)), 0.10); border-color: rgba(var(--dev-color-rgb, var(--accent-rgb)), 0.35); }
+/* Selection = neutral raised row + a bar in the speaker's colour (its own
+   colour if it has one, the accent otherwise). */
+.device.sel { background: var(--card-2); border-color: var(--border); box-shadow: inset 3px 0 0 var(--dev-color, var(--accent)); }
 .device.sel.open { border-bottom-left-radius: 0; border-bottom-right-radius: 0; margin-bottom: 0; border-bottom-color: transparent; }
 .device.dragging { opacity: 0.4; }
 
@@ -185,7 +187,7 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
   display: flex; align-items: center; gap: 8px; padding: 7px 10px;
   border-radius: 7px; font-size: 13px; color: var(--text); cursor: pointer;
 }
-.ctx-item:hover { background: rgba(var(--accent-rgb), 0.16); }
+.ctx-item:hover { background: var(--hover); }
 .ctx-check { width: 14px; flex: none; color: var(--accent-2); text-align: center; }
 .ctx-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ctx-sep { height: 1px; background: var(--border-soft); margin: 5px 8px; }
@@ -218,11 +220,11 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
 .dev-right { flex: none; display: flex; align-items: center; gap: 10px; width: 120px; }
 .dev-right.wide { width: auto; } /* inputs rows: slider + value + mute + VU */
 .act-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); flex: none; transition: background 0.3s; }
-.device.active .act-dot { background: var(--green); box-shadow: 0 0 6px rgba(61, 220, 132, 0.7); }
+.device.active .act-dot { background: var(--green); }
 .vu { flex: 1; height: 6px; border-radius: 3px; background: var(--track-off); overflow: hidden; }
 .vu-fill {
   height: 100%; width: 0%; border-radius: 3px;
-  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  background: var(--accent);
   transition: width 0.08s linear;
 }
 .vu-fill.hot { background: linear-gradient(90deg, var(--warn), var(--red)); }
@@ -233,13 +235,13 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
   border: 1px solid var(--border-soft); background: var(--card); color: var(--muted);
   display: grid; place-items: center; transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
-.icon-btn:hover { color: var(--text); border-color: var(--accent); background: rgba(var(--accent-rgb), 0.08); }
-.icon-btn.on { color: var(--red); border-color: rgba(239, 111, 111, 0.5); background: rgba(239, 111, 111, 0.1); }
+.icon-btn:hover { color: var(--text); border-color: var(--accent); background: var(--hover); }
+.icon-btn.on { color: var(--red); border-color: var(--red); }
 
 /* ---------- Modals ---------- */
 .modal {
   position: fixed; inset: 0; z-index: 15; display: grid; place-items: center;
-  background: rgba(6, 7, 10, 0.6); backdrop-filter: blur(6px);
+  background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(6px);
   opacity: 0; pointer-events: none; transition: opacity 0.15s;
 }
 .modal.show { opacity: 1; pointer-events: auto; }
@@ -281,13 +283,14 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
   cursor: pointer; transition: all 0.15s;
 }
 .seg button:hover { color: var(--text); }
-.seg button.on { background: var(--accent); color: #fff; box-shadow: 0 2px 8px var(--accent-glow); }
+.seg button.on { background: var(--accent); color: #fff; }
 
 /* ---------- Speaker sheet (opens in place, under the selected row) ---------- */
 #sheet {
   margin: 0 0 8px; padding: 12px 14px 14px;
-  background: rgba(var(--dev-color-rgb, var(--accent-rgb)), 0.06);
-  border: 1px solid rgba(var(--dev-color-rgb, var(--accent-rgb)), 0.35); border-top: 0;
+  background: var(--card-2);
+  border: 1px solid var(--border); border-top: 0;
+  box-shadow: inset 3px 0 0 var(--dev-color, var(--accent));
   border-radius: 0 0 10px 10px; cursor: default;
 }
 #sheet[hidden] { display: none; }
@@ -320,20 +323,20 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
 }
 .setup:hover { background: var(--card-2); }
 .setup:focus-visible { border-color: var(--accent); }
-.setup.on { background: rgba(var(--accent-rgb), 0.10); border-color: rgba(var(--accent-rgb), 0.35); }
+.setup.on { background: var(--card-2); border-color: var(--border); box-shadow: inset 3px 0 0 var(--accent); }
 .setup-play {
-  flex: none; border: 0; border-radius: 50%; cursor: pointer; display: grid; place-items: center;
-  width: 36px; height: 36px; color: var(--accent); background: rgba(var(--accent-rgb), 0.14);
-  transition: color 0.12s, background 0.12s, transform 0.1s;
+  flex: none; border: 1px solid var(--border); border-radius: 50%; cursor: pointer; display: grid; place-items: center;
+  width: 36px; height: 36px; color: var(--text); background: transparent;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
 }
-.setup-play:hover { background: rgba(var(--accent-rgb), 0.26); transform: scale(1.06); }
-.setup-play.playing { color: #fff; background: var(--accent); }
+.setup-play:hover { background: var(--hover); border-color: var(--accent); }
+.setup-play.playing { color: #fff; background: var(--accent); border-color: var(--accent); }
 .setup-ico {
   width: 26px; height: 26px; border-radius: 8px; flex: none; display: grid; place-items: center;
   background: var(--card-2); border: 1px solid var(--border-soft); color: var(--muted);
   font-size: 12px; transition: all 0.15s;
 }
-.setup.on .setup-ico { background: var(--accent); border-color: var(--accent); color: #fff; }
+.setup.on .setup-ico { background: var(--card); color: var(--text); border-color: var(--border); }
 .setup-main { flex: 1; min-width: 0; }
 .setup-name { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .setup-sub { display: flex; gap: 6px; align-items: center; margin-top: 2px; font-size: 11px; color: var(--faint); }
@@ -998,7 +1001,7 @@ let eqFlowTickTime = 0;              // performance.now() when eqFlowNext was re
 let eqFlowTickInterval = 100;        // measured time since the previous real sample
 let eqFlowLastTickTime = 0;
 let eqFlowRunning = false;
-let eqFlowAccent = "124, 111, 239";
+let eqFlowAccent = "59, 130, 246";
 
 function spectrumX(i, n) {
   return EQ_PAD_X + i * (eqVbW - 2 * EQ_PAD_X) / (n - 1);

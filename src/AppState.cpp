@@ -13,7 +13,7 @@ ConfigStore g_store;
 AppConfig g_cfg;
 
 
-COLORREF g_windowBg = RGB(0x0E, 0x10, 0x13);
+COLORREF g_windowBg = RGB(0x14, 0x14, 0x14);
 
 // The user's Windows accent color. DWM stores it as 0xAABBGGRR; falls back
 // to the app's original purple if the value is missing (accent on surfaces
@@ -25,7 +25,7 @@ COLORREF GetWindowsAccentColor() {
                      RRF_RT_REG_DWORD, nullptr, &value, &size) == ERROR_SUCCESS) {
         return RGB(value & 0xFF, (value >> 8) & 0xFF, (value >> 16) & 0xFF);
     }
-    return RGB(0x7C, 0x6F, 0xEF);
+    return RGB(0x3B, 0x82, 0xF6); // matches --accent in common.css
 }
 
 // Whether Windows apps currently use the light theme (Settings > Personnalisation
@@ -57,7 +57,7 @@ bool EffectiveLightTheme() {
 // Must match ui.html's --bg for each theme (the host brush shows through
 // while the web content repaints after a resize).
 COLORREF WindowBgForTheme(bool light) {
-    return light ? RGB(0xD4, 0xD5, 0xD9) : RGB(0x0E, 0x10, 0x13);
+    return light ? RGB(0xE8, 0xE8, 0xE8) : RGB(0x14, 0x14, 0x14);
 }
 
 // OutputSettings / Setup live in Config.h with the rest of the persisted state.

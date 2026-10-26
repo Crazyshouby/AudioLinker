@@ -16,7 +16,7 @@ function applyTheme(theme) {
 
 // Recolors the UI from the Windows accent color (sent in each state
 // message). --accent-2 is a lightened variant for gradients, --accent-rgb
-// feeds every translucent tint; --accent-glow derives from it in CSS.
+// feeds every translucent tint.
 function applyAccent(hex) {
   if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return;
   const r = parseInt(hex.slice(1, 3), 16);

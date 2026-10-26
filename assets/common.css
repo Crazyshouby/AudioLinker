@@ -1,39 +1,46 @@
 /* Shared by ui.html and options.html -- inlined into each page at build time
    by cmake/InlineAssets.cmake, in place of the "@common.css@" marker comment.
    Theme tokens, base typography and the controls both pages use: ghost
-   buttons, sliders, switches, the toast. Page layout stays in each page's
-   own <style>. */
+   buttons, sliders, switches, the toasts. Page layout stays in each page's
+   own <style>.
+
+   Design: neutral greys (no tint) for every surface; the accent colour --
+   the Windows one, see applyAccent() -- is reserved for what is active or
+   primary: the main button, checked boxes, slider fills, the selected tab,
+   the playing setup, the selection bar. Status colours (green / amber /
+   red) only ever mean a state. */
 
 :root {
-  --bg: #0e1013;
-  --card: #15181e;
-  --card-2: #1b202a;
-  --border: #262b35;
-  --border-soft: #1f232c;
-  --text: #eceef2;
-  --muted: #98a0ae;
-  --faint: #5c6370;
-  --track-off: #10131a;
-  --accent: #7c6fef;
-  --accent-2: #a78bfa;
-  --accent-rgb: 124, 111, 239;
-  --accent-glow: rgba(var(--accent-rgb), 0.35);
-  --green: #3ddc84;
-  --warn: #e8a33d;
-  --red: #ef6f6f;
+  --bg: #141414;
+  --card: #1c1c1c;
+  --card-2: #262626;
+  --border: #343434;
+  --border-soft: #2b2b2b;
+  --text: #ececec;
+  --muted: #a0a0a0;
+  --faint: #6b6b6b;
+  --track-off: #101010;
+  --hover: rgba(255, 255, 255, 0.07);
+  --accent: #3b82f6;
+  --accent-2: #7aa7f8;
+  --accent-rgb: 59, 130, 246;
+  --green: #4cc38a;
+  --warn: #e0a33e;
+  --red: #e5736f;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #d4d5d9;
-    --card: #dfe0e3;
-    --card-2: #cfd1d5;
-    --border: #b8bbc1;
-    --border-soft: #c6c8cd;
-    --text: #1c1e23;
-    --muted: #525864;
-    --faint: #7d818b;
-    --track-off: #b9bcc2;
+    --bg: #e8e8e8;
+    --card: #f6f6f6;
+    --card-2: #ececec;
+    --border: #cfcfcf;
+    --border-soft: #dcdcdc;
+    --text: #1c1c1c;
+    --muted: #5e5e5e;
+    --faint: #8c8c8c;
+    --track-off: #d4d4d4;
+    --hover: rgba(0, 0, 0, 0.06);
     --green: #1a9c58;
     --warn: #b5760a;
     --red: #c94343;
@@ -42,17 +49,20 @@
 }
 /* Options window's theme override (state.theme): the media query above is
    just the "system/auto" default -- these win in both directions once JS
-   sets data-theme on <html> (see applyTheme). The native side mirrors these
-   values (WindowBgForTheme, switcher palette): keep them in sync. */
+   sets data-theme on <html> (see applyTheme). The native side mirrors the
+   backgrounds and text colours (WindowBgForTheme in AppState.cpp, the
+   switcher palette in Switcher.cpp): keep them in sync. */
 :root[data-theme="light"] {
-  --bg: #d4d5d9; --card: #dfe0e3; --card-2: #cfd1d5; --border: #b8bbc1; --border-soft: #c6c8cd;
-  --text: #1c1e23; --muted: #525864; --faint: #7d818b; --track-off: #b9bcc2;
+  --bg: #e8e8e8; --card: #f6f6f6; --card-2: #ececec; --border: #cfcfcf; --border-soft: #dcdcdc;
+  --text: #1c1c1c; --muted: #5e5e5e; --faint: #8c8c8c; --track-off: #d4d4d4;
+  --hover: rgba(0, 0, 0, 0.06);
   --green: #1a9c58; --warn: #b5760a; --red: #c94343; color-scheme: light;
 }
 :root[data-theme="dark"] {
-  --bg: #0e1013; --card: #15181e; --card-2: #1b202a; --border: #262b35; --border-soft: #1f232c;
-  --text: #eceef2; --muted: #98a0ae; --faint: #5c6370; --track-off: #10131a;
-  --green: #3ddc84; --warn: #e8a33d; --red: #ef6f6f; color-scheme: dark;
+  --bg: #141414; --card: #1c1c1c; --card-2: #262626; --border: #343434; --border-soft: #2b2b2b;
+  --text: #ececec; --muted: #a0a0a0; --faint: #6b6b6b; --track-off: #101010;
+  --hover: rgba(255, 255, 255, 0.07);
+  --green: #4cc38a; --warn: #e0a33e; --red: #e5736f; color-scheme: dark;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
@@ -72,7 +82,7 @@ body {
   border-radius: 8px; padding: 5px 12px; font: 12.5px "Segoe UI Variable Text", "Segoe UI", sans-serif;
   cursor: pointer; transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
-.ghost-btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent); background: rgba(var(--accent-rgb),0.08); }
+.ghost-btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent); background: var(--hover); }
 .ghost-btn:disabled { opacity: 0.4; cursor: default; }
 .ghost-btn.on { color: #fff; background: var(--accent); border-color: var(--accent); }
 .ghost-btn.on:hover:not(:disabled) { color: #fff; background: var(--accent); filter: brightness(1.1); }
@@ -86,7 +96,7 @@ input[type="range"]::-webkit-slider-thumb {
   background: #fff; border: 2.5px solid var(--accent); cursor: pointer;
   transition: transform 0.1s, box-shadow 0.15s;
 }
-input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); box-shadow: 0 0 0 5px rgba(var(--accent-rgb),0.15); }
+input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.12); box-shadow: 0 0 0 4px var(--hover); }
 input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.05); }
 .val { width: 56px; flex: none; text-align: right; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
@@ -105,6 +115,8 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.05); }
 .switch input:checked + .track { background: var(--accent); border-color: var(--accent); }
 .switch input:checked + .track::after { left: 20px; background: #fff; }
 
+/* Toasts: a neutral card with a coloured edge saying what it is (red =
+   problem, green = done), instead of a whole tinted box. */
 #toasts {
   position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
   display: flex; flex-direction: column; align-items: center; gap: 8px;
@@ -112,12 +124,14 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.05); }
 }
 .toast {
   display: flex; align-items: center; gap: 14px; max-width: 100%;
-  background: #2a1d20; border: 1px solid rgba(239, 111, 111, 0.5); color: #ffd9d9;
-  border-radius: 10px; padding: 10px 18px; font-size: 13px; cursor: pointer;
+  background: var(--card-2); color: var(--text);
+  border: 1px solid var(--border); border-left: 3px solid var(--red);
+  border-radius: 10px; padding: 10px 16px; font-size: 13px; cursor: pointer;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
   opacity: 0; transform: translateY(12px); transition: opacity 0.25s, transform 0.25s;
   pointer-events: auto;
 }
-.toast.ok { background: #182a20; border-color: rgba(61, 220, 132, 0.5); color: #c9f5dc; }
+.toast.ok { border-left-color: var(--green); }
 .toast.show { opacity: 1; transform: none; }
 .toast-text { min-width: 0; }
-.toast .toast-action { flex: none; color: inherit; border-color: currentColor; padding: 4px 10px; }
+.toast .toast-action { flex: none; color: var(--text); border-color: var(--border); padding: 4px 10px; }
