@@ -48,6 +48,18 @@ struct SharedClient {
 bool OpenSharedClient(IMMDeviceEnumerator* enumerator, const std::wstring& deviceId,
                       SharedClient& out, const wchar_t* label = nullptr);
 
+// Initializes an event-driven shared-mode render stream on an opened
+// client. When lowLatency is set and the driver exposes IAudioClient3,
+// requests its minimum engine period (often ~2.7ms / 128 frames vs. the
+// classic ~10ms) so callbacks come faster and the device-buffer floor is
+// smaller; falls back to the classic 150ms Initialize on any failure (many
+// drivers report no sub-10ms period, and InitializeSharedAudioStream is
+// picky about the exact engine format). Returns the negotiated buffer size
+// in *bufferFrames. Shared by the engine's render sessions and the
+// calibrator's sweep player, so a measured delay models the same buffer.
+bool InitRenderStream(IAudioClient* client, const WAVEFORMATEX* fmt, HANDLE evt, bool lowLatency,
+                      UINT32* bufferFrames, const std::wstring& label);
+
 // Interleaved sample conversion, `samples` = frames * channels.
 void ToFloat(const BYTE* src, size_t samples, const StreamFormat& fmt, float* dst);
 void FromFloat(const float* src, size_t samples, const StreamFormat& fmt, BYTE* dst); // clamps for int16

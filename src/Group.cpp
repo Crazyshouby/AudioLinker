@@ -30,6 +30,29 @@ int EffectiveVolume(const OutputSettings& s) {
 }
 
 
+// --- Deferred actions after an asynchronous stop ---
+
+AfterStop g_afterStop = AfterStop::None;
+std::wstring g_afterStopArg;
+
+void QueueAfterStop(HWND hwnd, AfterStop action, const std::wstring& arg) {
+    g_afterStop = action;
+    g_afterStopArg = arg;
+    SetTimer(hwnd, IDT_STOP_POLL, 50, nullptr);
+}
+
+void RunAfterStop(HWND hwnd) {
+    AfterStop action = g_afterStop;
+    std::wstring arg = g_afterStopArg;
+    g_afterStop = AfterStop::None;
+    g_afterStopArg.clear();
+    switch (action) {
+        case AfterStop::Start: OnCreateGroup(hwnd); break;
+        case AfterStop::Calibrate: BeginMicCalibration(hwnd, arg); break;
+        case AfterStop::None: break;
+    }
+}
+
 // --- Group start/stop ---
 
 void OnCreateGroup(HWND hwnd) {
@@ -37,6 +60,13 @@ void OnCreateGroup(HWND hwnd) {
     // pass runs -- and it will restart the group itself if it stopped one.
     if (g_calibrating) {
         SendError(L"Patientez : calage micro en cours.");
+        return;
+    }
+    // The previous group is still winding down on its own thread (see
+    // AudioEngine::stopAsync): start as soon as it is gone. Lets every
+    // "stop then start" caller stay a plain OnStop(); OnCreateGroup();.
+    if (g_engine.isStopping()) {
+        QueueAfterStop(hwnd, AfterStop::Start);
         return;
     }
     // The Windows-visible endpoint name follows the active setup: setups ARE
@@ -167,14 +197,81 @@ void OnStop(HWND hwnd) {
     if (g_optimizing) { KillTimer(hwnd, IDT_OPT_TIMER); g_optimizing = false; }
     g_awaitingGroupStart = false;
     g_playingSetup.clear();
-    g_engine.stop();
+    // Threads are torn down in the background; Windows is put back in
+    // order right away (neither step needs the other).
+    g_engine.stopAsync();
     RestoreDefaultAndUnroute();
     SendState();
 }
 
 void ToggleGroup(HWND hwnd) {
     if (g_engine.isRunning()) OnStop(hwnd);
-    else if (!g_engine.isStarting()) OnCreateGroup(hwnd);
+    else if (!g_engine.isStarting() && !g_engine.isStopping()) OnCreateGroup(hwnd);
+}
+
+// Mic-based latency alignment (see Calibrator.h). The group must be silent
+// during the sweeps: a playing group is stopped here and restarted by
+// IDT_CAL_TIMER once the pass ends.
+void BeginMicCalibration(HWND hwnd, const std::wstring& micId) {
+    if (g_engine.isStarting()) {
+        SendError(L"Patientez : le groupe est en cours de démarrage.");
+        return;
+    }
+    if (g_calibrating || micId.empty()) return;
+    std::vector<std::wstring> ids;
+    for (const auto& d : g_outputDevices) {
+        if (g_settings[d.id].checked) ids.push_back(d.id);
+    }
+    if (ids.size() < 2) {
+        SendError(L"Cochez au moins deux enceintes à caler entre elles.");
+        return;
+    }
+    if (g_engine.isRunning()) {
+        g_calRestartAfter = true; // stays set across the queued re-entry below
+        OnStop(hwnd);
+    }
+    if (g_engine.isStopping()) {
+        QueueAfterStop(hwnd, AfterStop::Calibrate, micId);
+        return;
+    }
+    if (!g_calibrator.start(micId, ids, g_deviceFillMs, g_lowLatency)) return;
+    g_calibrating = true;
+    SetTimer(hwnd, IDT_CAL_TIMER, 250, nullptr);
+    SendCalStatus();
+}
+
+// The (id, source) set a running group is built from: two configs with the
+// same set differ only in per-output knobs the engine changes live.
+std::set<std::pair<std::wstring, unsigned long>> ActiveOutputSet() {
+    std::set<std::pair<std::wstring, unsigned long>> set;
+    for (const auto& d : g_outputDevices) {
+        const auto& s = g_settings[d.id];
+        if (s.checked) set.emplace(d.id, s.sourcePid);
+    }
+    return set;
+}
+
+// Pushes the live config of every active output into the running engine
+// -- what a setup switch between two presets built on the same speakers
+// amounts to, with no audible gap instead of a full stop/start.
+void PushLiveSettingsToEngine(const std::wstring& groupName) {
+    for (const auto& d : g_outputDevices) {
+        const auto& s = g_settings[d.id];
+        if (!s.checked) continue;
+        g_engine.setLatencyMs(d.id, s.latencyMs);
+        g_engine.setChannelMode(d.id, s.channelMode);
+        g_engine.setVolumePercent(d.id, EffectiveVolume(s));
+        for (int b = 0; b < kEqBandCount; ++b) g_engine.setEqBand(d.id, b, s.eqDb[b]);
+        g_engine.setMuted(d.id, s.muted);
+        g_engine.resyncOutput(d.id);
+    }
+    // The Windows-visible endpoint name follows the setup (see OnCreateGroup).
+    for (const auto& d : g_deviceManager->enumerateRenderDevices()) {
+        if (!IsCableDevice(d.name)) continue;
+        std::wstring currentBase = d.name.substr(0, d.name.find(L" ("));
+        if (currentBase != groupName) RenameEndpoint(d.id, groupName);
+        break;
+    }
 }
 
 // --- Setup actions ---
@@ -272,8 +369,17 @@ void ApplySetup(HWND hwnd, const std::wstring& name, bool ensureRunning) {
         return;
     }
     bool wasRunning = g_engine.isRunning();
-    if (wasRunning) OnStop(hwnd);
-    if (!MergeSetupIntoLiveSettings(name)) return;
+    auto before = wasRunning ? ActiveOutputSet() : std::set<std::pair<std::wstring, unsigned long>>{};
+    if (!MergeSetupIntoLiveSettings(name)) return; // unknown setup: nothing touched
+    if (wasRunning && ActiveOutputSet() == before) {
+        // Same speakers, same sources: switch live, no restart, no gap.
+        PushLiveSettingsToEngine(name);
+        g_playingSetup = name;
+        wasRunning = false; // nothing left to restart below
+        ensureRunning = false;
+    } else if (wasRunning) {
+        OnStop(hwnd);
+    }
     if (!g_setupMicId.empty()) {
         SetDefaultEndpointAllRoles(g_setupMicId);
         // Restore the level/mute snapshotted when the setup was saved

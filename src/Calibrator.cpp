@@ -170,7 +170,7 @@ private:
 // actually applied -- the backlog group playback keeps, added back so the
 // measured delay models it.
 bool PlaySweep(IMMDeviceEnumerator* enumerator, const std::wstring& deviceId,
-               MicRecorder& mic, const std::atomic<bool>& cancel, int fillMs,
+               MicRecorder& mic, const std::atomic<bool>& cancel, int fillMs, bool lowLatency,
                INT64& dacHnsOut, int& backlogMsOut) {
     SharedClient sc;
     ComPtr<IAudioRenderClient> render;
@@ -178,11 +178,17 @@ bool PlaySweep(IMMDeviceEnumerator* enumerator, const std::wstring& deviceId,
     IAudioClient* client = sc.client.Get();
     const int channels = sc.format.channels;
     const int rate = sc.format.rate;
-    // Same 150ms buffer the engine's render sessions request, so bufferMsOut
-    // (the "kept full" backlog) matches what group playback will really use.
-    if (FAILED(client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 1'500'000, 0, sc.mix, nullptr))) return false;
+    // The exact stream setup of the engine's render sessions (same buffer,
+    // same low-latency period when enabled), so backlogMsOut -- the "kept
+    // full" part -- matches what group playback will really use. The event
+    // is required by the event-driven init; this loop keeps polling instead.
+    struct EventHandle {
+        HANDLE h = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        ~EventHandle() { if (h) CloseHandle(h); }
+    } evt;
     UINT32 bufferFrames = 0;
-    if (FAILED(client->GetBufferSize(&bufferFrames)) || bufferFrames == 0) return false;
+    if (!evt.h || !InitRenderStream(client, sc.mix, evt.h, lowLatency, &bufferFrames, L"balayage")) return false;
+    if (bufferFrames == 0) return false;
     if (FAILED(client->GetService(__uuidof(IAudioRenderClient),
                                    reinterpret_cast<void**>(render.GetAddressOf())))) return false;
     UINT32 fillFrames = static_cast<UINT32>(static_cast<INT64>(fillMs) * rate / 1000);
@@ -281,11 +287,12 @@ Calibrator::~Calibrator() {
 }
 
 bool Calibrator::start(const std::wstring& micId, const std::vector<std::wstring>& outputIds,
-                       int deviceFillMs) {
+                       int deviceFillMs, bool lowLatency) {
     if (running_.load()) return false;
     if (worker_.joinable()) worker_.join();
     cancel_ = false;
     deviceFillMs_ = deviceFillMs;
+    lowLatency_ = lowLatency;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         error_.clear();
@@ -352,7 +359,7 @@ void Calibrator::worker(std::wstring micId) {
         setState(i, CalState::Measuring);
         INT64 dacHns = 0;
         int backlogMs = 0;
-        bool played = PlaySweep(enumerator.Get(), ids[i], mic, cancel_, deviceFillMs_,
+        bool played = PlaySweep(enumerator.Get(), ids[i], mic, cancel_, deviceFillMs_, lowLatency_,
                                 dacHns, backlogMs);
         if (played && !cancel_.load()) {
             // Let the recording catch up with the sweep's tail end.

@@ -101,11 +101,37 @@ void MigrateDeviceId(const std::wstring& oldId, const std::wstring& newId) {
     LOG_INFO(L"Périphérique reconnu sous un nouvel identifiant, réglages transférés : " + newId);
 }
 
+// --- Automation: "when this speaker connects / disconnects" rules ---
+
+std::wstring g_pendingAutoSetup;
+std::set<std::wstring> g_lastPresentIds;
+bool g_presentIdsKnown = false; // the first enumeration is not a "connection"
+
+void RunAutomation(const std::set<std::wstring>& before, const std::set<std::wstring>& after) {
+    for (const auto& r : g_cfg.automation) {
+        bool was = before.count(r.deviceId) != 0;
+        bool now = after.count(r.deviceId) != 0;
+        if (!was && now && !r.onConnect.empty()) {
+            LOG_INFO(L"Automatisation : enceinte connectée, setup « " + r.onConnect + L" » dans " +
+                     std::to_wstring(kAutomationDelayMs) + L" ms.");
+            g_pendingAutoSetup = r.onConnect;
+            if (g_mainWnd) SetTimer(g_mainWnd, IDT_AUTOMATION, kAutomationDelayMs, nullptr);
+        }
+        if (was && !now && r.onDisconnect == L"stop" && (g_engine.isRunning() || g_engine.isStarting())) {
+            LOG_INFO(L"Automatisation : enceinte déconnectée, arrêt du groupe.");
+            if (g_mainWnd) OnStop(g_mainWnd);
+        }
+    }
+}
+
 void PopulateOutputList() {
     g_outputDevices.clear();
     auto devices = g_deviceManager->enumerateRenderDevices();
     std::set<std::wstring> presentIds;
     for (const auto& d : devices) presentIds.insert(d.id);
+    if (g_presentIdsKnown && presentIds != g_lastPresentIds) RunAutomation(g_lastPresentIds, presentIds);
+    g_lastPresentIds = presentIds;
+    g_presentIdsKnown = true;
     const long long now = static_cast<long long>(std::time(nullptr));
     bool dirty = false;
     for (auto& d : devices) {

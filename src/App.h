@@ -83,6 +83,14 @@ constexpr UINT_PTR IDT_RESUME = 6;
 // slider drag or a setup apply produces into one file write.
 constexpr UINT_PTR IDT_SAVE = 7;
 constexpr int kSaveDelayMs = 500;
+// Polls AudioEngine::isStopping() after an asynchronous stop, then runs
+// whatever was waiting for it (see AfterStop / RunAfterStop).
+constexpr UINT_PTR IDT_STOP_POLL = 8;
+// Delay between a speaker's (re)appearance and the setup its automation
+// rule starts: a Bluetooth endpoint is enumerated before its stream is
+// really ready to open.
+constexpr UINT_PTR IDT_AUTOMATION = 9;
+constexpr int kAutomationDelayMs = 1500;
 constexpr UINT WM_TRAYICON = WM_APP + 1;
 constexpr UINT WM_DEVICES_CHANGED = WM_APP + 2;
 // Windows' default render endpoint changed (see DeviceNotificationClient).
@@ -186,6 +194,8 @@ bool IsCableDevice(const std::wstring& name);
 IMMNotificationClient& DeviceNotificationSink();
 void SortOutputDevicesByOrder();
 void PopulateOutputList();
+// Setup an automation rule asked to start, applied by IDT_AUTOMATION.
+extern std::wstring g_pendingAutoSetup;
 
 // --- Group.cpp: group lifecycle, setups, config saving ---
 void FlushConfig();
@@ -194,6 +204,15 @@ int EffectiveVolume(const OutputSettings& s);
 void OnCreateGroup(HWND hwnd);
 void OnStop(HWND hwnd);
 void ToggleGroup(HWND hwnd);
+// What to do once an asynchronous stop (AudioEngine::stopAsync) completes:
+// OnCreateGroup and BeginMicCalibration queue themselves here when they
+// find the engine still winding down, and IDT_STOP_POLL fires RunAfterStop.
+enum class AfterStop { None, Start, Calibrate };
+void QueueAfterStop(HWND hwnd, AfterStop action, const std::wstring& arg = L"");
+void RunAfterStop(HWND hwnd);
+// Mic-based latency alignment pass (stops a running group first and
+// restarts it once the pass ends).
+void BeginMicCalibration(HWND hwnd, const std::wstring& micId);
 void SaveSetupFromCurrent(std::wstring name);
 // ensureRunning: force the group to (re)start even if it wasn't already
 // running -- used by the setup row's dedicated play button. Other callers

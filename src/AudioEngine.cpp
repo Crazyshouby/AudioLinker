@@ -182,6 +182,10 @@ bool AudioEngine::start(const std::wstring& sourceId, bool sourceIsLoopback,
                          const std::wstring& masterVolumeDeviceId,
                          const std::vector<OutputLinkConfig>& outputConfigs,
                          std::wstring& errorOut) {
+    if (stopping_.load()) {
+        errorOut = L"Le moteur est en cours d'arrêt.";
+        return false;
+    }
     if (running_.load() || starting_.load()) {
         errorOut = L"Le moteur est déjà démarré.";
         return false;
@@ -190,9 +194,11 @@ bool AudioEngine::start(const std::wstring& sourceId, bool sourceIsLoopback,
         errorOut = L"Aucune sortie sélectionnée.";
         return false;
     }
-    // A previous attempt's starterThread_ is guaranteed finished by now
-    // (starting_ is false), but still needs joining before we can reuse it.
+    // A previous attempt's starterThread_ (and a previous stopAsync()'s
+    // stopperThread_) are guaranteed finished by now -- starting_/stopping_
+    // are false -- but still need joining before they can be reused.
     if (starterThread_.joinable()) starterThread_.join();
+    if (stopperThread_.joinable()) stopperThread_.join();
 
     {
         std::lock_guard<std::mutex> lock(outputsMutex_);
@@ -350,6 +356,9 @@ bool AudioEngine::takeStartError(std::wstring& errorOut) {
 }
 
 void AudioEngine::stop() {
+    // An asynchronous stop may be in flight: let it finish, it does the
+    // same work.
+    if (stopperThread_.joinable()) stopperThread_.join();
     running_ = false;
     // Wake a starter still waiting on the capture threads' init reports
     // (taking the mutex first so the wake-up can't slip between its
@@ -368,6 +377,34 @@ void AudioEngine::stop() {
     captureThreads_.clear();
     joinAndClearOutputs();
     starting_ = false;
+}
+
+void AudioEngine::stopAsync() {
+    if (stopping_.exchange(true)) return; // already winding down
+    if (!running_.load() && !starting_.load()) {
+        stopping_ = false; // nothing to stop
+        return;
+    }
+    running_ = false;
+    {
+        std::lock_guard<std::mutex> lock(startMutex_);
+    }
+    startCv_.notify_all();
+    if (stopperThread_.joinable()) stopperThread_.join(); // previous one is done
+    // The capture threads iterate outputs_ lock-free, so outputs_ must not
+    // be touched (by a swap here, or by a new start()) until they are
+    // joined -- hence everything happens on the helper, and start() refuses
+    // while stopping_ is up.
+    stopperThread_ = std::thread([this]() {
+        if (starterThread_.joinable()) starterThread_.join();
+        for (auto& t : captureThreads_) {
+            if (t.joinable()) t.join();
+        }
+        captureThreads_.clear();
+        joinAndClearOutputs();
+        starting_ = false;
+        stopping_ = false; // last: readers may call start() right after
+    });
 }
 
 void AudioEngine::setLatencyMs(const std::wstring& outputId, int ms) {
@@ -993,53 +1030,6 @@ void AudioEngine::renderThreadProc(OutputState* state) {
     if (mmcssHandle) AvRevertMmThreadCharacteristics(mmcssHandle);
 }
 
-namespace {
-
-// Initializes an event-driven shared-mode render stream. When low-latency
-// mode is on and the driver exposes IAudioClient3, requests its minimum
-// engine period (often ~2.7ms / 128 frames vs. the classic ~10ms) so
-// callbacks come faster and the device-buffer floor is smaller. Returns the
-// negotiated buffer size in *bufferFrames. Falls back to the classic 150ms
-// Initialize on any failure -- many drivers report no sub-10ms period, and
-// InitializeSharedAudioStream is picky about the exact engine format.
-// `label` is just for the log line.
-bool InitLowLatencyRender(IAudioClient* client, const WAVEFORMATEX* fmt, HANDLE evt,
-                          UINT32* bufferFrames, const std::wstring& label, bool lowLatency) {
-    if (lowLatency) {
-        ComPtr<IAudioClient3> client3;
-        if (SUCCEEDED(client->QueryInterface(__uuidof(IAudioClient3),
-                                             reinterpret_cast<void**>(client3.GetAddressOf())))) {
-            UINT32 def = 0, fundamental = 0, minPeriod = 0, maxPeriod = 0;
-            if (SUCCEEDED(client3->GetSharedModeEnginePeriod(fmt, &def, &fundamental,
-                                                             &minPeriod, &maxPeriod)) &&
-                minPeriod > 0 && minPeriod < def) {
-                HRESULT hr = client3->InitializeSharedAudioStream(
-                    AUDCLNT_STREAMFLAGS_EVENTCALLBACK, minPeriod, fmt, nullptr);
-                if (SUCCEEDED(hr) && SUCCEEDED(client->SetEventHandle(evt)) &&
-                    SUCCEEDED(client->GetBufferSize(bufferFrames))) {
-                    LOG_INFO(L"Basse latence OK sur " + label + L" : période " +
-                             std::to_wstring(minPeriod) + L" trames (défaut " +
-                             std::to_wstring(def) + L"), tampon " + std::to_wstring(*bufferFrames));
-                    return true;
-                }
-                LOG_WARN(L"Basse latence refusée sur " + label + L" (" + log_detail::Hr(hr) +
-                         L") — repli sur le mode standard.");
-            }
-        }
-    }
-    // Classic path: 150ms allocation, only the fill target kept queued.
-    HRESULT hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-                                    1500000, 0, fmt, nullptr);
-    if (FAILED(hr)) {
-        LOG_ERROR(L"Initialize (rendu) a échoué sur " + label + L" : " + log_detail::Hr(hr));
-        return false;
-    }
-    if (FAILED(client->SetEventHandle(evt))) return false;
-    return SUCCEEDED(client->GetBufferSize(bufferFrames));
-}
-
-} // namespace
-
 AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, bool firstSession) {
     ComPtr<IMMDeviceEnumerator> enumerator;
     SharedClient sc;
@@ -1064,8 +1054,8 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
         state->channels = sc.format.channels;
         state->sampleRate = sc.format.rate;
 
-        if (!InitLowLatencyRender(audioClient, sc.mix, renderEvent, &bufferFrameCount,
-                                  state->deviceId, lowLatency_.load())) break;
+        if (!InitRenderStream(audioClient, sc.mix, renderEvent, lowLatency_.load(), &bufferFrameCount,
+                              state->deviceId)) break;
         if (FAILED(audioClient->GetService(__uuidof(IAudioRenderClient),
                                             reinterpret_cast<void**>(renderClient.GetAddressOf())))) break;
         // Best-effort: feeds the device-lag estimate used by auto-alignment.

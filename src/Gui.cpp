@@ -399,6 +399,19 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 FlushConfig(); // kills the timer itself
                 return 0;
             }
+            if (wParam == IDT_STOP_POLL) {
+                if (g_engine.isStopping()) return 0; // still winding down
+                KillTimer(hwnd, IDT_STOP_POLL);
+                RunAfterStop(hwnd);
+                return 0;
+            }
+            if (wParam == IDT_AUTOMATION) {
+                KillTimer(hwnd, IDT_AUTOMATION);
+                std::wstring name = g_pendingAutoSetup;
+                g_pendingAutoSetup.clear();
+                if (!name.empty()) ApplySetup(hwnd, name, /*ensureRunning=*/true);
+                return 0;
+            }
             if (wParam == IDT_OPT_TIMER) {
                 if (g_optimizing) OptimizerTick(hwnd);
                 return 0;

@@ -98,6 +98,13 @@ void SendState() {
     j["playingSetup"] = U8(g_playingSetup);
     j["setupMic"] = U8(g_setupMicId);
 
+    // Automation rules keyed by device id (see AutomationRule).
+    j["automation"] = json::object();
+    for (const auto& r : g_cfg.automation) {
+        j["automation"][U8(r.deviceId)] = { { "onConnect", U8(r.onConnect) },
+                                            { "onDisconnect", U8(r.onDisconnect) } };
+    }
+
     // Physical capture devices, for the INPUTS tab and the mic-calibration
     // modal's input picker (virtual endpoints filtered out: a cable "mic"
     // can't hear a speaker, and shouldn't become anyone's default mic).
@@ -276,28 +283,25 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
     }
     if (cmd == L"toggle") { ToggleGroup(hwnd); return; }
     if (cmd == L"calstart") {
-        // calstart|micId -- mic-based automatic latency alignment (see
-        // Calibrator.h). The group must be silent during the sweeps; if it
-        // was playing it is stopped here and restarted once the pass ends.
-        if (g_engine.isStarting()) {
-            SendError(L"Patientez : le groupe est en cours de démarrage.");
-            return;
+        // calstart|micId -- mic-based automatic latency alignment.
+        BeginMicCalibration(hwnd, rest);
+        return;
+    }
+    if (cmd == L"automation") {
+        // automation|deviceId|onConnect|onDisconnect -- "when this speaker
+        // connects, start setup X / when it disconnects, stop". Both empty
+        // = no rule for this device.
+        auto parts = SplitPipes(rest);
+        if (parts.size() < 3 || parts[0].empty()) return;
+        auto& rules = g_cfg.automation;
+        rules.erase(std::remove_if(rules.begin(), rules.end(),
+                                   [&](const AutomationRule& r) { return r.deviceId == parts[0]; }),
+                    rules.end());
+        if (!parts[1].empty() || !parts[2].empty()) {
+            rules.push_back({ parts[0], parts[1], parts[2] });
         }
-        if (g_calibrating || rest.empty()) return;
-        std::vector<std::wstring> ids;
-        for (const auto& d : g_outputDevices) {
-            if (g_settings[d.id].checked) ids.push_back(d.id);
-        }
-        if (ids.size() < 2) {
-            SendError(L"Cochez au moins deux enceintes à caler entre elles.");
-            return;
-        }
-        g_calRestartAfter = g_engine.isRunning();
-        if (g_calRestartAfter) OnStop(hwnd);
-        if (!g_calibrator.start(rest, ids, g_deviceFillMs)) return;
-        g_calibrating = true;
-        SetTimer(hwnd, IDT_CAL_TIMER, 250, nullptr);
-        SendCalStatus();
+        SaveConfig();
+        SendState();
         return;
     }
     if (cmd == L"calcancel") {

@@ -124,8 +124,14 @@ public:
                const std::vector<OutputLinkConfig>& outputConfigs,
                std::wstring& errorOut);
     void stop();
+    // Non-blocking stop: the threads are torn down on a helper thread (a
+    // WASAPI Stop on a Bluetooth device can take hundreds of ms, during
+    // which the caller's UI would freeze). Poll isStopping() until it drops
+    // back to false; start() refuses while it is true.
+    void stopAsync();
     bool isRunning() const { return running_.load() && !starting_.load(); }
     bool isStarting() const { return starting_.load(); }
+    bool isStopping() const { return stopping_.load(); }
     // Valid to call once isStarting() has gone from true back to false.
     // Returns true (and fills errorOut) if that start attempt failed.
     bool takeStartError(std::wstring& errorOut);
@@ -282,7 +288,9 @@ private:
 
     std::atomic<bool> running_{false};
     std::atomic<bool> starting_{false};
+    std::atomic<bool> stopping_{false};
     std::thread starterThread_;
+    std::thread stopperThread_; // see stopAsync()
     std::vector<std::thread> captureThreads_; // one per distinct source
 
     std::mutex startErrorMutex_;

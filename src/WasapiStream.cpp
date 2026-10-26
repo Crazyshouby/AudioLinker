@@ -81,6 +81,41 @@ bool OpenSharedClient(IMMDeviceEnumerator* enumerator, const std::wstring& devic
     return true;
 }
 
+bool InitRenderStream(IAudioClient* client, const WAVEFORMATEX* fmt, HANDLE evt, bool lowLatency,
+                      UINT32* bufferFrames, const std::wstring& label) {
+    if (lowLatency) {
+        ComPtr<IAudioClient3> client3;
+        if (SUCCEEDED(client->QueryInterface(__uuidof(IAudioClient3),
+                                             reinterpret_cast<void**>(client3.GetAddressOf())))) {
+            UINT32 def = 0, fundamental = 0, minPeriod = 0, maxPeriod = 0;
+            if (SUCCEEDED(client3->GetSharedModeEnginePeriod(fmt, &def, &fundamental,
+                                                             &minPeriod, &maxPeriod)) &&
+                minPeriod > 0 && minPeriod < def) {
+                HRESULT hr = client3->InitializeSharedAudioStream(
+                    AUDCLNT_STREAMFLAGS_EVENTCALLBACK, minPeriod, fmt, nullptr);
+                if (SUCCEEDED(hr) && SUCCEEDED(client->SetEventHandle(evt)) &&
+                    SUCCEEDED(client->GetBufferSize(bufferFrames))) {
+                    LOG_INFO(L"Basse latence OK sur " + label + L" : période " +
+                             std::to_wstring(minPeriod) + L" trames (défaut " +
+                             std::to_wstring(def) + L"), tampon " + std::to_wstring(*bufferFrames));
+                    return true;
+                }
+                LOG_WARN(L"Basse latence refusée sur " + label + L" (" + log_detail::Hr(hr) +
+                         L") — repli sur le mode standard.");
+            }
+        }
+    }
+    // Classic path: 150ms allocation, only the fill target kept queued.
+    HRESULT hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                                    1500000, 0, fmt, nullptr);
+    if (FAILED(hr)) {
+        LOG_ERROR(L"Initialize (rendu) a échoué sur " + label + L" : " + log_detail::Hr(hr));
+        return false;
+    }
+    if (FAILED(client->SetEventHandle(evt))) return false;
+    return SUCCEEDED(client->GetBufferSize(bufferFrames));
+}
+
 void ToFloat(const BYTE* src, size_t samples, const StreamFormat& fmt, float* dst) {
     if (fmt.isFloat) {
         std::memcpy(dst, src, samples * sizeof(float));
