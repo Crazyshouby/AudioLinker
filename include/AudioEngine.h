@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <condition_variable>
 #include <string>
 #include <vector>
 #include <thread>
@@ -59,6 +60,9 @@ struct OutputLinkConfig {
     unsigned long sourcePid = 0;
 };
 
+// Non-destructive per-output status: safe to read from several places (the
+// GUI status timer, the latency optimizer...) without them stepping on each
+// other. Level meters live in OutputPeaks/takePeaks() instead.
 struct OutputStatus {
     std::wstring deviceId;
     bool active = false;
@@ -69,15 +73,22 @@ struct OutputStatus {
     unsigned long sourcePid = 0; // 0 = system source (see OutputLinkConfig)
     uint64_t underruns = 0;
     uint64_t driftCorrections = 0;
-    double peak = 0.0; // peak amplitude 0..1 since the previous getStatus()
     // Device-side lag in ms (frames submitted vs. frames the endpoint reports
     // as played, via IAudioClock): WASAPI buffer + driver/Bluetooth buffering.
     // 0 until the first measurement (~1s after the output starts).
     int deviceLagMs = 0;
-    // Peak amplitude 0..1 since the previous getStatus(), same as peak but
-    // measured after a bandpass filter centered on each kSpectrumBandFreqs
-    // entry -- a real 10-band spectrum of what's actually being sent to this
-    // output, for the EQ panel's spectrum animation.
+};
+
+// Level meters, reset by each takePeaks() -- so exactly one consumer (the
+// GUI's VU timer) should call it.
+struct OutputPeaks {
+    std::wstring deviceId;
+    double peak = 0.0; // peak amplitude 0..1 since the previous takePeaks()
+    // Peak amplitude 0..1 since the previous takePeaks(), measured after a
+    // bandpass filter centered on each kSpectrumBandFreqs entry -- a real
+    // 10-band spectrum of what's actually being sent to this output, for the
+    // EQ panel's spectrum animation. All zero unless this output is the
+    // current setSpectrumTarget().
     std::array<double, kSpectrumBandCount> spectrumBands{};
 };
 
@@ -144,7 +155,14 @@ public:
     // Same idea as resyncOutput() but for every output at once -- used after
     // a base-cushion change (slider commit) instead of one output at a time.
     void resyncAllOutputs();
+    // Counters and flags, non-destructive (see OutputStatus).
     std::vector<OutputStatus> getStatus();
+    // Level meters since the previous call (destructive read, one consumer).
+    std::vector<OutputPeaks> takePeaks();
+    // The 10-band spectrum costs ten biquad passes over a copy of every
+    // callback's audio; only one output's spectrum is ever displayed, so only
+    // that one computes it. Empty id = none (window hidden, no selection).
+    void setSpectrumTarget(const std::wstring& outputId);
 
     // Plays two short identifying beeps directly to this one physical
     // device (a brief standalone WASAPI shared-mode stream, independent of
@@ -162,7 +180,7 @@ public:
     void startMicMetering(const std::vector<std::wstring>& deviceIds);
     void stopMicMetering();
     // Peak 0..1 per metered device since the previous call (destructive
-    // read, like getStatus()). Empty when metering is off.
+    // read, like takePeaks()). Empty when metering is off.
     std::vector<std::pair<std::wstring, double>> getMicPeaks();
 
 private:
@@ -187,7 +205,8 @@ private:
         // reconfigure it for the device's possibly-changed mix format.
         std::atomic<bool> formatDirty{false};
         std::atomic<int> peakMilli{0}; // peak * 1000 since last status read
-        std::atomic<int> spectrumMilli[kSpectrumBandCount] = {}; // see OutputStatus::spectrumBands
+        std::atomic<int> spectrumMilli[kSpectrumBandCount] = {}; // see OutputPeaks::spectrumBands
+        std::atomic<bool> spectrumEnabled{false}; // see setSpectrumTarget
         std::atomic<int> deviceLagMs{0}; // see OutputStatus::deviceLagMs
         std::atomic<bool> forceResync{false};
         std::atomic<double> speedAdjustment{1.0};
@@ -197,6 +216,11 @@ private:
         // freezes its drift controller and stops counting underruns while
         // it's up (silence is expected, not a glitch).
         std::atomic<bool> sourceLost{false};
+        // The capture thread found the ring too full to take a whole packet
+        // (render side stalled for seconds). Counted as one drift correction
+        // per episode -- set on the first short write, cleared by the render
+        // thread's next resync -- instead of once per packet.
+        std::atomic<bool> ringOverflow{false};
         // Frames (as raw sample count) the render thread wants the capture
         // thread to pad the ring with on its next write. Once formatReady is
         // set, the render thread is this ring's sole reader and must never
@@ -229,6 +253,10 @@ private:
     CaptureSessionEnd runCaptureSession(const std::wstring& sourceId, bool loopback,
                                         const std::wstring& masterVolumeDeviceId,
                                         unsigned long sourcePid, bool firstSession);
+    // Called once per capture thread, as soon as its first session's stream
+    // init has either succeeded or failed -- the starter blocks on this
+    // instead of guessing with a fixed delay.
+    void reportCaptureInit(bool ok);
     // Flips sourceLost on every output fed by this source.
     void markSourceLost(unsigned long sourcePid, bool lost);
     // Outer loop: runs one device session at a time and, once the group has
@@ -246,6 +274,11 @@ private:
     // clear outputs_, record the error) -- everything stop() would do, minus
     // touching starterThread_ itself since this runs ON that thread.
     void failStart(const std::wstring& error);
+    // Detaches outputs_ under the mutex, then joins their render threads
+    // with the mutex released -- joining under it blocked getStatus() (the
+    // GUI timer) for as long as a Bluetooth device took to stop.
+    void joinAndClearOutputs();
+    void joinIdentifyJobs(bool finishedOnly);
 
     std::atomic<bool> running_{false};
     std::atomic<bool> starting_{false};
@@ -255,11 +288,20 @@ private:
     std::mutex startErrorMutex_;
     std::wstring startError_;
     std::atomic<bool> hasStartError_{false};
-    // Capture threads whose FIRST session failed to initialize -- checked by
-    // the starter's fail-fast window so a bad start is still reported as a
-    // whole-group failure (runtime losses, by contrast, only pause their own
-    // source's outputs).
-    std::atomic<int> captureInitFails_{0};
+    // First-session init outcome of every capture thread (see
+    // reportCaptureInit): the starter waits until all have reported, so a
+    // slow activation (process loopback can take up to 3s) is still a
+    // reported failure, not a silently muted "running" group.
+    std::mutex startMutex_;
+    std::condition_variable startCv_;
+    int captureInitPending_ = 0;
+    bool captureInitFailed_ = false;
+
+    // Engine-wide tuning, read by the render/capture threads on every
+    // callback -- see the setters above and the kDefault* constants.
+    std::atomic<int> baseCushionMs_{kDefaultBaseCushionMs};
+    std::atomic<int> deviceFillMs_{kDefaultDeviceFillMs};
+    std::atomic<bool> lowLatency_{false};
 
     // Mirrors the Windows-controlled volume/mute of masterVolumeDeviceId,
     // kept live by an IAudioEndpointVolumeCallback registered from
@@ -267,6 +309,15 @@ private:
     // output's volume.
     std::atomic<float> masterVolumeScalar_{1.0f};
     std::atomic<bool> masterMuted_{false};
+
+    // identifyOutput() workers: kept (not detached) so none can outlive the
+    // engine and touch COM after the process has torn it down.
+    struct IdentifyJob {
+        std::thread thread;
+        std::shared_ptr<std::atomic<bool>> done;
+    };
+    std::mutex identifyMutex_;
+    std::vector<IdentifyJob> identifyJobs_;
 
     struct MicMeterEntry {
         std::wstring deviceId;

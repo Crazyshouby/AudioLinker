@@ -1159,6 +1159,15 @@ function selectDevice(id) {
   selectedId = id;
   for (const [did, r] of rowRefs) r.row.classList.toggle("sel", did === id);
   renderEqCard();
+  announceSpectrumTarget();
+}
+
+// Tells the engine which output (if any) needs its 10-band spectrum
+// computed: the selected one while the window is visible, none otherwise.
+// Re-sent on every state message too, since a group start recreates the
+// engine's outputs with the flag cleared.
+function announceSpectrumTarget() {
+  post("spectrum|" + (selectedId && !document.hidden ? selectedId : ""));
 }
 
 // ---------- EQ curve (5-band graphic EQ) ----------
@@ -1401,6 +1410,7 @@ function renderAll() {
   renderUpdateSetupButton();
   renderMasterVolume();
   renderFooter();
+  announceSpectrumTarget();
 }
 
 // ---------- Per-speaker source (selected in the EQ panel) ----------
@@ -1599,6 +1609,7 @@ $("#devTabs").addEventListener("click", ev => {
 // Mic metering holds capture streams open (Windows shows "micro en cours
 // d'utilisation"), so it must not survive the window being hidden to tray.
 document.addEventListener("visibilitychange", () => {
+  announceSpectrumTarget();
   if (devTab !== "inputs") return;
   post(`micmeter|${document.hidden ? 0 : 1}`);
 });

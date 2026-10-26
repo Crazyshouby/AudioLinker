@@ -1180,9 +1180,11 @@ void SendState() {
 }
 
 void SendStatus() {
-    // getStatus() is a destructive read (peak resets to 0), so it is called
-    // exactly once per timer tick, here.
     auto status = g_engine.getStatus();
+    // takePeaks() is a destructive read (meters reset to 0), so it is called
+    // exactly once per timer tick, here -- every other reader (optimizer,
+    // alignment) only uses the non-destructive getStatus().
+    auto peaks = g_engine.takePeaks();
 
     // A captured app that died no longer takes the engine down (its outputs
     // just play silence), so the group's stop path won't unroute it anytime
@@ -1210,8 +1212,12 @@ void SendStatus() {
     for (size_t i = 0; i < status.size(); ++i) {
         const auto& st = status[i];
         if (i) j += L',';
+        const OutputPeaks* pk = nullptr;
+        for (const auto& p : peaks) {
+            if (p.deviceId == st.deviceId) { pk = &p; break; }
+        }
         wchar_t peakBuf[16];
-        swprintf(peakBuf, 16, L"%.3f", st.peak);
+        swprintf(peakBuf, 16, L"%.3f", pk ? pk->peak : 0.0);
         j += L"{\"id\":\"" + JsonEscape(st.deviceId) +
              L"\",\"active\":" + BoolJson(st.active) +
              L",\"sourceLost\":" + BoolJson(st.sourceLost) +
@@ -1222,7 +1228,7 @@ void SendStatus() {
         for (int b = 0; b < kSpectrumBandCount; ++b) {
             if (b) j += L',';
             wchar_t bandBuf[16];
-            swprintf(bandBuf, 16, L"%.3f", st.spectrumBands[b]);
+            swprintf(bandBuf, 16, L"%.3f", pk ? pk->spectrumBands[b] : 0.0);
             j += bandBuf;
         }
         j += L"]}";
@@ -2137,57 +2143,6 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
         return;
     }
     if (cmd == L"toggle") { ToggleGroup(hwnd); return; }
-    if (cmd == L"autolatency") {
-        // Align every active speaker on the slowest one, using the device-
-        // reported playback lag (WASAPI buffer + driver/Bluetooth buffering).
-        if (!g_engine.isRunning()) {
-            SendError(L"Démarrez le groupe avant de caler les latences.");
-            return;
-        }
-        auto status = g_engine.getStatus();
-        struct Lag { std::wstring id; int ms; };
-        std::vector<Lag> lags;
-        int maxLag = -1;
-        std::wstring slowestId;
-        bool notReady = false;
-        for (const auto& st : status) {
-            auto it = g_settings.find(st.deviceId);
-            if (it == g_settings.end() || !it->second.checked || !st.active) continue;
-            if (st.deviceLagMs <= 0) notReady = true;
-            lags.push_back({ st.deviceId, st.deviceLagMs });
-            if (st.deviceLagMs > maxLag) {
-                maxLag = st.deviceLagMs;
-                slowestId = st.deviceId;
-            }
-        }
-        if (lags.size() < 2) {
-            SendError(L"Il faut au moins deux enceintes actives pour les caler entre elles.");
-            return;
-        }
-        if (notReady) {
-            SendError(L"Mesure du retard en cours… réessayez dans quelques secondes.");
-            return;
-        }
-        for (const auto& lag : lags) {
-            int v = maxLag - lag.ms;
-            v = ClampLatencyMs(v);
-            g_settings[lag.id].latencyMs = v;
-            g_engine.setLatencyMs(lag.id, v);
-            g_engine.resyncOutput(lag.id); // snap to the new target within ~1s
-        }
-        g_activeSetup.clear(); // latencies just diverged from any preset
-        SaveConfig();
-        SendState();
-        std::wstring slowestName = slowestId;
-        for (const auto& d : g_outputDevices) {
-            if (d.id != slowestId) continue;
-            const auto& s = g_settings[d.id];
-            slowestName = s.alias.empty() ? d.name : s.alias;
-        }
-        SendInfo(L"Latences calées sur « " + slowestName + L" » (l'enceinte la plus lente, " +
-                 std::to_wstring(maxLag) + L" ms). Ajustement effectif d'ici 1 à 2 secondes.");
-        return;
-    }
     if (cmd == L"calstart") {
         // calstart|micId -- mic-based automatic latency alignment (see
         // Calibrator.h). The group must be silent during the sweeps; if it
@@ -2450,6 +2405,13 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
         g_engine.identifyOutput(rest);
         return;
     }
+    if (cmd == L"spectrum") {
+        // spectrum|deviceId (empty = none) -- which output, if any, has its
+        // EQ panel on screen and therefore needs the 10-band spectrum
+        // computed (see AudioEngine::setSpectrumTarget).
+        g_engine.setSpectrumTarget(rest);
+        return;
+    }
     if (cmd == L"eq") {
         // eq|deviceId|band|value -- 3 arguments, so handled here rather than
         // in the generic cmd|deviceId|value block below.
@@ -2664,10 +2626,12 @@ void InitWebView(HWND hwnd) {
 // its controller is destroyed outright when it closes.
 
 void SuspendMainWebView() {
-    // The page posts micmeter|0 from its visibilitychange handler, but
-    // suspension can win that race -- stop metering here too so the Windows
-    // "microphone in use" indicator never stays lit with the window hidden.
+    // The page posts micmeter|0 and spectrum| from its visibilitychange
+    // handler, but suspension can win that race -- stop metering here too so
+    // the Windows "microphone in use" indicator never stays lit with the
+    // window hidden, and nobody computes a spectrum nobody can see.
     StopMicMetering();
+    g_engine.setSpectrumTarget(L"");
     if (!g_webviewController || !g_webview) return;
     g_webviewController->put_IsVisible(FALSE); // TrySuspend requires hidden
     ComPtr<ICoreWebView2_19> wv19;
