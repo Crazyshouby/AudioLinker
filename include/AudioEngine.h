@@ -152,6 +152,19 @@ public:
     // which. Fire-and-forget: spawns its own thread and returns immediately.
     void identifyOutput(const std::wstring& deviceId);
 
+    // VU metering for the GUI's INPUTS tab: one lightweight shared-mode
+    // capture stream per given device, read-and-discarded by a single
+    // polling thread, publishing a per-mic peak. Independent of the group,
+    // and shared mode never steals a mic from other apps -- but it does
+    // light the Windows "microphone in use" indicator, so the GUI only
+    // meters while the tab is actually visible. startMicMetering() replaces
+    // any running meter set.
+    void startMicMetering(const std::vector<std::wstring>& deviceIds);
+    void stopMicMetering();
+    // Peak 0..1 per metered device since the previous call (destructive
+    // read, like getStatus()). Empty when metering is off.
+    std::vector<std::pair<std::wstring, double>> getMicPeaks();
+
 private:
     struct OutputState {
         std::wstring deviceId;
@@ -254,6 +267,18 @@ private:
     // output's volume.
     std::atomic<float> masterVolumeScalar_{1.0f};
     std::atomic<bool> masterMuted_{false};
+
+    struct MicMeterEntry {
+        std::wstring deviceId;
+        std::atomic<int> peakMilli{0};
+    };
+    // Swapped wholesale by start/stopMicMetering() under micMeterMutex_; the
+    // meter thread and getMicPeaks() each hold their own shared_ptr to the
+    // bank, so neither can race a swap.
+    std::shared_ptr<std::vector<std::unique_ptr<MicMeterEntry>>> micMeterBank_;
+    std::mutex micMeterMutex_;
+    std::atomic<bool> micMeterRun_{false};
+    std::thread micMeterThread_;
 
     std::mutex outputsMutex_;
     std::vector<std::unique_ptr<OutputState>> outputs_;

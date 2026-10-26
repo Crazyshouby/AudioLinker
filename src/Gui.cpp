@@ -10,6 +10,8 @@
 #include <dwmapi.h>
 #include <commdlg.h>
 #include <audiopolicy.h>
+#include <endpointvolume.h>
+#include <mmdeviceapi.h>
 #include <tlhelp32.h>
 #include <roapi.h>
 #include <winstring.h>
@@ -143,6 +145,14 @@ struct OutputSettings {
 struct Setup {
     std::wstring name;
     std::vector<std::pair<std::wstring, OutputSettings>> devices;
+    // Capture endpoint made the Windows default mic when this setup is
+    // applied. Empty = this setup leaves the default mic alone.
+    std::wstring micId;
+    // Windows input level/mute of that mic, snapshotted at save time and
+    // re-applied with it. micVolume -1 = saved before this existed (or no
+    // mic): leave the level alone.
+    int micVolume = -1;
+    bool micMute = false;
 };
 
 std::unique_ptr<DeviceManager> g_deviceManager;
@@ -194,6 +204,18 @@ bool g_autostart = false;
 // unchanged in g_settings/the ini) -- lets one slider duck the whole group
 // without losing the balance set between speakers.
 int g_masterVolumePercent = 100;
+// Mic tied to the current live configuration (INPUTS tab): snapshotted into
+// setups on save, restored from them on apply (where it also becomes the
+// Windows default capture device). Empty = don't manage the default mic.
+std::wstring g_setupMicId;
+// Mic VU metering is on (INPUTS tab visible). Drives who owns
+// IDT_STATUS_TIMER alongside g_statusTimerForGroup: the timer runs when
+// either wants it, and each stop path only kills it if the other is done.
+bool g_micMetering = false;
+// The status timer was started for a playing group -- distinguishes "the
+// engine stopped unexpectedly" (WM_TIMER must call OnStop) from "the timer
+// only runs for mic metering" (idle engine is normal).
+bool g_statusTimerForGroup = false;
 // Mirrors AudioEngine's base ring-buffer cushion (kDefaultBaseCushionMs) so
 // it can be edited from the UI and persisted -- see the "cushion"/
 // "cushioncommit" web commands.
@@ -379,6 +401,7 @@ void SaveConfig() {
     WritePrivateProfileStringW(L"group", L"autostart", g_autostart ? L"1" : L"0", g_configPath.c_str());
     WritePrivateProfileStringW(L"group", L"mastervolume", std::to_wstring(g_masterVolumePercent).c_str(),
                                g_configPath.c_str());
+    WritePrivateProfileStringW(L"group", L"micid", g_setupMicId.c_str(), g_configPath.c_str());
     WritePrivateProfileStringW(L"group", L"cushionms", std::to_wstring(g_baseCushionMs).c_str(),
                                g_configPath.c_str());
     WritePrivateProfileStringW(L"group", L"devicefillms", std::to_wstring(g_deviceFillMs).c_str(),
@@ -539,6 +562,11 @@ void SaveSetupsToIni() {
         const auto& setup = g_setups[i];
         std::wstring section = SetupSection(i);
         WritePrivateProfileStringW(section.c_str(), L"name", setup.name.c_str(), g_configPath.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"mic", setup.micId.c_str(), g_configPath.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"micvol",
+                                   std::to_wstring(setup.micVolume).c_str(), g_configPath.c_str());
+        WritePrivateProfileStringW(section.c_str(), L"micmute", setup.micMute ? L"1" : L"0",
+                                   g_configPath.c_str());
         WritePrivateProfileStringW(section.c_str(), L"devcount",
                                    std::to_wstring(setup.devices.size()).c_str(), g_configPath.c_str());
         for (size_t k = 0; k < setup.devices.size(); ++k) {
@@ -576,6 +604,12 @@ void LoadSetupsFromIni() {
         GetPrivateProfileStringW(section.c_str(), L"name", L"", buf, 512, g_configPath.c_str());
         setup.name = buf;
         if (setup.name.empty()) continue;
+        GetPrivateProfileStringW(section.c_str(), L"mic", L"", buf, 512, g_configPath.c_str());
+        setup.micId = buf;
+        setup.micVolume = static_cast<int>(GetPrivateProfileIntW(
+            section.c_str(), L"micvol", static_cast<UINT>(-1), g_configPath.c_str()));
+        if (setup.micVolume >= 0) setup.micVolume = ClampVolume(setup.micVolume);
+        setup.micMute = GetPrivateProfileIntW(section.c_str(), L"micmute", 0, g_configPath.c_str()) != 0;
         int devCount = GetPrivateProfileIntW(section.c_str(), L"devcount", 0, g_configPath.c_str());
         for (int k = 0; k < devCount; ++k) {
             std::wstring key = L"dev" + std::to_wstring(k);
@@ -665,7 +699,9 @@ bool RenameEndpoint(const std::wstring& deviceId, const std::wstring& newName) {
     return SUCCEEDED(pc->SetPropertyValue(deviceId.c_str(), 0, PKEY_Device_DeviceDesc, &pv));
 }
 
-bool SetDefaultRenderDevice(const std::wstring& deviceId) {
+// Works for render and capture endpoints alike: SetDefaultEndpoint keys on
+// the endpoint id, which carries its own flow.
+bool SetDefaultEndpointAllRoles(const std::wstring& deviceId) {
     ComPtr<IPolicyConfig> pc;
     if (FAILED(CoCreateInstance(__uuidof(CPolicyConfigClient), nullptr, CLSCTX_ALL,
                                  __uuidof(IPolicyConfig),
@@ -686,6 +722,74 @@ std::wstring GetDefaultRenderId() {
         if (d.isDefault) return d.id;
     }
     return L"";
+}
+
+// --- Windows input level of capture endpoints (INPUTS tab) ---
+
+ComPtr<IAudioEndpointVolume> OpenEndpointVolume(const std::wstring& deviceId) {
+    ComPtr<IMMDeviceEnumerator> enumerator;
+    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                 __uuidof(IMMDeviceEnumerator),
+                                 reinterpret_cast<void**>(enumerator.GetAddressOf())))) {
+        return {};
+    }
+    ComPtr<IMMDevice> device;
+    if (FAILED(enumerator->GetDevice(deviceId.c_str(), device.GetAddressOf()))) return {};
+    ComPtr<IAudioEndpointVolume> volume;
+    if (FAILED(device->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr,
+                                 reinterpret_cast<void**>(volume.GetAddressOf())))) {
+        return {};
+    }
+    return volume;
+}
+
+// The same input level/mute the Sound settings page shows -- system-wide,
+// every app capturing this mic sees the change.
+bool GetCaptureVolume(const std::wstring& deviceId, int& volPercent, bool& muted) {
+    auto volume = OpenEndpointVolume(deviceId);
+    if (!volume) return false;
+    float scalar = 1.0f;
+    BOOL m = FALSE;
+    if (FAILED(volume->GetMasterVolumeLevelScalar(&scalar))) return false;
+    volume->GetMute(&m);
+    volPercent = static_cast<int>(scalar * 100.0f + 0.5f);
+    muted = m != FALSE;
+    return true;
+}
+
+bool SetCaptureVolume(const std::wstring& deviceId, int volPercent) {
+    auto volume = OpenEndpointVolume(deviceId);
+    if (!volume) return false;
+    return SUCCEEDED(volume->SetMasterVolumeLevelScalar(
+        ClampVolume(volPercent) / 100.0f, nullptr));
+}
+
+bool SetCaptureMute(const std::wstring& deviceId, bool muted) {
+    auto volume = OpenEndpointVolume(deviceId);
+    if (!volume) return false;
+    return SUCCEEDED(volume->SetMute(muted ? TRUE : FALSE, nullptr));
+}
+
+// (Re)starts engine metering over the current capture-device set. Shared by
+// the micmeter web command and the hot-plug refresh (a mic plugged in while
+// the INPUTS tab is open must start metering too).
+void StartMicMetering() {
+    std::vector<std::wstring> ids;
+    for (const auto& d : g_deviceManager->enumerateCaptureDevices()) {
+        if (!IsVirtualDevice(d.name)) ids.push_back(d.id);
+    }
+    g_micMetering = true;
+    g_engine.startMicMetering(ids);
+    // The status timer normally only runs with the group; metering needs its
+    // ticks too (SendStatus carries the mic peaks).
+    SetTimer(g_mainWnd, IDT_STATUS_TIMER, 250, nullptr);
+}
+
+void StopMicMetering() {
+    if (!g_micMetering) return;
+    g_micMetering = false;
+    g_engine.stopMicMetering();
+    if (!g_statusTimerForGroup && g_mainWnd) KillTimer(g_mainWnd, IDT_STATUS_TIMER);
 }
 
 // --- Audio source apps (process-loopback candidates) ---
@@ -1046,23 +1150,30 @@ void SendState() {
     }
     j += L"],\"activeSetup\":\"" + JsonEscape(g_activeSetup) +
          L"\",\"editingSetup\":\"" + JsonEscape(g_editingSetup) +
-         L"\",\"playingSetup\":\"" + JsonEscape(g_playingSetup) + L"\",\"sources\":[";
+         L"\",\"playingSetup\":\"" + JsonEscape(g_playingSetup) +
+         L"\",\"setupMic\":\"" + JsonEscape(g_setupMicId) + L"\",\"sources\":[";
     auto sources = EnumerateSourceApps();
     for (size_t i = 0; i < sources.size(); ++i) {
         if (i) j += L',';
         j += L"{\"pid\":" + std::to_wstring(sources[i].pid) +
              L",\"name\":\"" + JsonEscape(sources[i].name) + L"\"}";
     }
-    // Physical capture devices, for the mic-calibration modal's input picker
-    // (virtual endpoints filtered out: a cable "mic" can't hear a speaker).
+    // Physical capture devices, for the INPUTS tab and the mic-calibration
+    // modal's input picker (virtual endpoints filtered out: a cable "mic"
+    // can't hear a speaker, and shouldn't become anyone's default mic).
     j += L"],\"inputs\":[";
     size_t inputCount = 0;
     for (const auto& d : g_deviceManager->enumerateCaptureDevices()) {
         if (IsVirtualDevice(d.name)) continue;
         if (inputCount++) j += L',';
+        int micVol = 100;
+        bool micMuted = false;
+        GetCaptureVolume(d.id, micVol, micMuted);
         j += L"{\"id\":\"" + JsonEscape(d.id) +
              L"\",\"name\":\"" + JsonEscape(d.name) +
-             L"\",\"default\":" + BoolJson(d.isDefault) + L"}";
+             L"\",\"default\":" + BoolJson(d.isDefault) +
+             L",\"volume\":" + std::to_wstring(micVol) +
+             L",\"muted\":" + BoolJson(micMuted) + L"}";
     }
     j += L"]}";
     PostJson(j);
@@ -1115,6 +1226,16 @@ void SendStatus() {
             j += bandBuf;
         }
         j += L"]}";
+    }
+    // Per-mic peaks for the INPUTS tab's VU meters -- empty unless metering
+    // is on (tab visible).
+    j += L"],\"micPeaks\":[";
+    auto micPeaks = g_engine.getMicPeaks();
+    for (size_t i = 0; i < micPeaks.size(); ++i) {
+        if (i) j += L',';
+        wchar_t peakBuf[16];
+        swprintf(peakBuf, 16, L"%.3f", micPeaks[i].second);
+        j += L"{\"id\":\"" + JsonEscape(micPeaks[i].first) + L"\",\"peak\":" + peakBuf + L"}";
     }
     j += L"]}";
     PostJson(j);
@@ -1719,7 +1840,7 @@ void OnCreateGroup(HWND hwnd) {
         if (g_previousDefaultId == cableRender->id) {
             g_previousDefaultId = outputs[0].deviceId;
         }
-        SetDefaultRenderDevice(cableRender->id);
+        SetDefaultEndpointAllRoles(cableRender->id);
     } else {
         // Pure app-sourced group: the real default device stays in place.
         loopback = false;
@@ -1744,7 +1865,7 @@ void OnCreateGroup(HWND hwnd) {
         // Only the synchronous pre-checks (already running, nothing selected)
         // fail here; device negotiation itself now runs in the background.
         UnrouteAllApps();
-        if (!g_previousDefaultId.empty()) SetDefaultRenderDevice(g_previousDefaultId);
+        if (!g_previousDefaultId.empty()) SetDefaultEndpointAllRoles(g_previousDefaultId);
         SendError(error);
         return;
     }
@@ -1753,19 +1874,21 @@ void OnCreateGroup(HWND hwnd) {
     // finish (see WM_TIMER); once running, it drives the VU meters.
     g_playingSetup = g_activeSetup;
     g_awaitingGroupStart = true;
+    g_statusTimerForGroup = true;
     SetTimer(hwnd, IDT_STATUS_TIMER, 250, nullptr);
     SendState();
 }
 
 void OnStop(HWND hwnd) {
-    KillTimer(hwnd, IDT_STATUS_TIMER);
+    g_statusTimerForGroup = false;
+    if (!g_micMetering) KillTimer(hwnd, IDT_STATUS_TIMER);
     if (g_optimizing) { KillTimer(hwnd, IDT_OPT_TIMER); g_optimizing = false; }
     g_awaitingGroupStart = false;
     g_playingSetup.clear();
     g_engine.stop();
     UnrouteAllApps(); // put captured apps back on their normal output
     if (!g_previousDefaultId.empty()) {
-        SetDefaultRenderDevice(g_previousDefaultId);
+        SetDefaultEndpointAllRoles(g_previousDefaultId);
         g_previousDefaultId.clear();
     }
     SendState();
@@ -1792,6 +1915,13 @@ void SaveSetupFromCurrent(std::wstring name) {
 
     Setup setup;
     setup.name = name;
+    setup.micId = g_setupMicId;
+    if (!setup.micId.empty()) {
+        // Snapshot the mic's current Windows level/mute so applying the
+        // setup restores them too. Fails harmlessly (micVolume stays -1,
+        // level untouched on apply) if the mic is unplugged right now.
+        GetCaptureVolume(setup.micId, setup.micVolume, setup.micMute);
+    }
     bool anyChecked = false;
     for (const auto& d : g_outputDevices) {
         const auto& s = g_settings[d.id];
@@ -1846,6 +1976,12 @@ bool MergeSetupIntoLiveSettings(const std::wstring& name) {
         g_settings[id] = merged;
     }
 
+    // The setup's mic becomes the live selection here (so the INPUTS tab
+    // reflects it), but Windows' default capture device only changes in
+    // ApplySetup() -- selecting a setup for editing must not switch mics,
+    // mirroring how it doesn't touch playback.
+    g_setupMicId = setup->micId;
+
     g_activeSetup = name;
     g_editingSetup = name;
     return true;
@@ -1859,6 +1995,19 @@ void ApplySetup(HWND hwnd, const std::wstring& name, bool ensureRunning) {
     bool wasRunning = g_engine.isRunning();
     if (wasRunning) OnStop(hwnd);
     if (!MergeSetupIntoLiveSettings(name)) return;
+    if (!g_setupMicId.empty()) {
+        SetDefaultEndpointAllRoles(g_setupMicId);
+        // Restore the level/mute snapshotted when the setup was saved
+        // (micVolume -1 = pre-snapshot setup, leave the level alone).
+        for (const auto& s : g_setups) {
+            if (s.name != name) continue;
+            if (s.micVolume >= 0) {
+                SetCaptureVolume(s.micId, s.micVolume);
+                SetCaptureMute(s.micId, s.micMute);
+            }
+            break;
+        }
+    }
     SaveConfig();
     SendState();
     if (wasRunning || ensureRunning) OnCreateGroup(hwnd); // (re)start playback on the new configuration
@@ -2241,6 +2390,59 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
         }
         return;
     }
+    if (cmd == L"setupmic") {
+        // setupmic|captureId -- picks the mic tied to the current config
+        // (INPUTS tab). Applied to Windows immediately; re-picking the
+        // selected mic clears the choice (Windows default left as-is from
+        // then on). Setup-level state, so the active preset diverges.
+        if (rest == g_setupMicId) {
+            g_setupMicId.clear();
+        } else {
+            g_setupMicId = rest;
+            if (!SetDefaultEndpointAllRoles(rest)) {
+                SendError(L"Impossible de définir ce micro comme périphérique par défaut.");
+            }
+        }
+        g_activeSetup.clear();
+        SaveConfig();
+        SendState();
+        return;
+    }
+    if (cmd == L"micvolume") {
+        // micvolume|captureId|percent -- live Windows input level while the
+        // slider drags. No SaveConfig/SendState here: a state resend would
+        // rebuild the list mid-drag, and the value lives in Windows anyway.
+        size_t p = rest.find(L'|');
+        if (p == std::wstring::npos) return;
+        SetCaptureVolume(rest.substr(0, p), _wtoi(rest.substr(p + 1).c_str()));
+        return;
+    }
+    if (cmd == L"micvolcommit") {
+        // End of the slider gesture: the mic level is setup-level state
+        // (snapshotted on save), so the active preset diverges now.
+        g_activeSetup.clear();
+        SaveConfig();
+        SendState();
+        return;
+    }
+    if (cmd == L"micmute") {
+        // micmute|captureId|0/1 -- Windows-level mic mute, system-wide.
+        size_t p = rest.find(L'|');
+        if (p == std::wstring::npos) return;
+        SetCaptureMute(rest.substr(0, p), rest.substr(p + 1) == L"1");
+        g_activeSetup.clear();
+        SaveConfig();
+        SendState();
+        return;
+    }
+    if (cmd == L"micmeter") {
+        // micmeter|0/1 -- VU metering for the INPUTS tab, on only while the
+        // tab is actually visible: it holds open capture streams, which
+        // lights the Windows "microphone in use" indicator.
+        if (rest == L"1") StartMicMetering();
+        else StopMicMetering();
+        return;
+    }
     if (cmd == L"identify") {
         // identify|deviceId -- plays a couple of short beeps directly to
         // that one device, independent of the group, so the user can tell
@@ -2462,6 +2664,10 @@ void InitWebView(HWND hwnd) {
 // its controller is destroyed outright when it closes.
 
 void SuspendMainWebView() {
+    // The page posts micmeter|0 from its visibilitychange handler, but
+    // suspension can win that race -- stop metering here too so the Windows
+    // "microphone in use" indicator never stays lit with the window hidden.
+    StopMicMetering();
     if (!g_webviewController || !g_webview) return;
     g_webviewController->put_IsVisible(FALSE); // TrySuspend requires hidden
     ComPtr<ICoreWebView2_19> wv19;
@@ -2724,6 +2930,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             g_autostartPending = g_autostart;
             g_masterVolumePercent = ClampVolume(
                 static_cast<int>(GetPrivateProfileIntW(L"group", L"mastervolume", 100, g_configPath.c_str())));
+            {
+                wchar_t micBuf[512] = {};
+                GetPrivateProfileStringW(L"group", L"micid", L"", micBuf, 512, g_configPath.c_str());
+                g_setupMicId = micBuf;
+            }
             g_baseCushionMs = ClampCushionMs(static_cast<int>(GetPrivateProfileIntW(
                 L"group", L"cushionms", kDefaultBaseCushionMs, g_configPath.c_str())));
             g_engine.setBaseCushionMs(g_baseCushionMs);
@@ -2861,6 +3072,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             if (wParam == IDT_DEVICE_REFRESH) {
                 KillTimer(hwnd, IDT_DEVICE_REFRESH);
                 PopulateOutputList();
+                if (g_micMetering) StartMicMetering(); // fresh mic set
                 SendState();
                 return 0;
             }
@@ -2921,10 +3133,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     std::wstring error;
                     if (g_engine.takeStartError(error)) {
                         LOG_ERROR(L"Échec du démarrage du groupe : " + error);
-                        KillTimer(hwnd, IDT_STATUS_TIMER);
+                        g_statusTimerForGroup = false;
+                        if (!g_micMetering) KillTimer(hwnd, IDT_STATUS_TIMER);
                         UnrouteAllApps();
                         if (!g_previousDefaultId.empty()) {
-                            SetDefaultRenderDevice(g_previousDefaultId);
+                            SetDefaultEndpointAllRoles(g_previousDefaultId);
                             g_previousDefaultId.clear();
                         }
                         SendState();
@@ -2936,8 +3149,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     return 0;
                 }
                 SendStatus();
-                if (!g_engine.isRunning()) {
-                    // Engine stopped unexpectedly (e.g. device unplugged)
+                if (g_statusTimerForGroup && !g_engine.isRunning()) {
+                    // Engine stopped unexpectedly (e.g. device unplugged).
+                    // Guarded: without a group, the timer legitimately runs
+                    // for mic metering alone with an idle engine.
                     OnStop(hwnd);
                 }
             }
@@ -2953,7 +3168,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 }
                 UnrouteAllApps();
                 if (!g_previousDefaultId.empty()) {
-                    SetDefaultRenderDevice(g_previousDefaultId);
+                    SetDefaultEndpointAllRoles(g_previousDefaultId);
                     g_previousDefaultId.clear();
                 }
             }
@@ -2988,7 +3203,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             g_engine.stop();
             UnrouteAllApps();
             if (!g_previousDefaultId.empty()) {
-                SetDefaultRenderDevice(g_previousDefaultId);
+                SetDefaultEndpointAllRoles(g_previousDefaultId);
             }
             if (g_webview) {
                 g_webview->remove_WebMessageReceived(g_webMessageToken);

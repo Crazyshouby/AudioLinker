@@ -208,6 +208,7 @@ AudioEngine::AudioEngine() = default;
 
 AudioEngine::~AudioEngine() {
     stop();
+    stopMicMetering();
 }
 
 bool AudioEngine::start(const std::wstring& sourceId, bool sourceIsLoopback,
@@ -546,6 +547,116 @@ void AudioEngine::identifyOutput(const std::wstring& deviceId) {
         Sleep(150); // let the tail actually finish playing before Stop() cuts it off
         audioClient->Stop();
     }).detach();
+}
+
+void AudioEngine::startMicMetering(const std::vector<std::wstring>& deviceIds) {
+    stopMicMetering();
+    auto bank = std::make_shared<std::vector<std::unique_ptr<MicMeterEntry>>>();
+    for (const auto& id : deviceIds) {
+        auto e = std::make_unique<MicMeterEntry>();
+        e->deviceId = id;
+        bank->push_back(std::move(e));
+    }
+    {
+        std::lock_guard<std::mutex> lock(micMeterMutex_);
+        micMeterBank_ = bank;
+    }
+    micMeterRun_ = true;
+    micMeterThread_ = std::thread([this, bank]() {
+        ComScope com;
+        if (!com.ownsInit) return;
+        auto enumerator = CreateDeviceEnumerator();
+        if (!enumerator) return;
+
+        struct Stream {
+            MicMeterEntry* entry = nullptr;
+            ComPtr<IAudioClient> client;
+            ComPtr<IAudioCaptureClient> capture;
+            int channels = 2;
+            bool isFloat = true;
+        };
+        std::vector<Stream> streams;
+        for (auto& e : *bank) {
+            Stream s;
+            s.entry = e.get();
+            ComPtr<IMMDevice> device;
+            if (FAILED(enumerator->GetDevice(e->deviceId.c_str(), device.GetAddressOf()))) continue;
+            if (FAILED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
+                                         reinterpret_cast<void**>(s.client.GetAddressOf())))) {
+                continue;
+            }
+            WAVEFORMATEX* mix = nullptr;
+            if (FAILED(s.client->GetMixFormat(&mix)) || !mix) continue;
+            if (!isSupportedFormat(mix)) { CoTaskMemFree(mix); continue; }
+            s.channels = mix->nChannels;
+            s.isFloat = isFloatFormat(mix);
+            HRESULT hr = s.client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0,
+                                              2'000'000 /*200ms*/, 0, mix, nullptr);
+            CoTaskMemFree(mix);
+            if (FAILED(hr)) continue;
+            if (FAILED(s.client->GetService(__uuidof(IAudioCaptureClient),
+                                             reinterpret_cast<void**>(s.capture.GetAddressOf())))) {
+                continue;
+            }
+            if (FAILED(s.client->Start())) continue;
+            streams.push_back(std::move(s));
+        }
+
+        // 50ms polling is plenty for a VU refreshed by the 250ms status
+        // timer, and the 200ms stream buffer never overflows between polls.
+        while (micMeterRun_.load()) {
+            for (auto& s : streams) {
+                float peak = 0.0f;
+                UINT32 packet = 0;
+                while (SUCCEEDED(s.capture->GetNextPacketSize(&packet)) && packet > 0) {
+                    BYTE* data = nullptr;
+                    UINT32 frames = 0;
+                    DWORD flags = 0;
+                    if (FAILED(s.capture->GetBuffer(&data, &frames, &flags, nullptr, nullptr))) break;
+                    if (!(flags & AUDCLNT_BUFFERFLAGS_SILENT) && data) {
+                        size_t n = static_cast<size_t>(frames) * s.channels;
+                        if (s.isFloat) {
+                            const float* f = reinterpret_cast<const float*>(data);
+                            for (size_t i = 0; i < n; ++i) peak = std::max(peak, std::abs(f[i]));
+                        } else {
+                            const int16_t* p = reinterpret_cast<const int16_t*>(data);
+                            for (size_t i = 0; i < n; ++i) {
+                                peak = std::max(peak, std::abs(p[i]) / 32768.0f);
+                            }
+                        }
+                    }
+                    s.capture->ReleaseBuffer(frames);
+                }
+                int milli = static_cast<int>(peak * 1000.0f);
+                int prev = s.entry->peakMilli.load();
+                while (milli > prev && !s.entry->peakMilli.compare_exchange_weak(prev, milli)) {}
+            }
+            Sleep(50);
+        }
+        for (auto& s : streams) s.client->Stop();
+    });
+}
+
+void AudioEngine::stopMicMetering() {
+    micMeterRun_ = false;
+    if (micMeterThread_.joinable()) micMeterThread_.join();
+    std::lock_guard<std::mutex> lock(micMeterMutex_);
+    micMeterBank_.reset();
+}
+
+std::vector<std::pair<std::wstring, double>> AudioEngine::getMicPeaks() {
+    std::shared_ptr<std::vector<std::unique_ptr<MicMeterEntry>>> bank;
+    {
+        std::lock_guard<std::mutex> lock(micMeterMutex_);
+        bank = micMeterBank_;
+    }
+    std::vector<std::pair<std::wstring, double>> out;
+    if (!bank) return out;
+    out.reserve(bank->size());
+    for (auto& e : *bank) {
+        out.emplace_back(e->deviceId, e->peakMilli.exchange(0) / 1000.0);
+    }
+    return out;
 }
 
 namespace {

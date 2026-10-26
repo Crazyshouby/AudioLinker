@@ -137,12 +137,38 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
 
 /* ---------- Device list ---------- */
 #devicesCard { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 150px; }
-#deviceList { flex: 1; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
+#deviceList, #inputList { flex: 1; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
 #devicesToolbar { flex: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-soft); flex-wrap: nowrap; }
 #devicesToolbar #sMasterVol { min-width: 0; }
-#deviceList::-webkit-scrollbar { width: 8px; }
-#deviceList::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-#deviceList::-webkit-scrollbar-thumb:hover { background: var(--faint); }
+#deviceList::-webkit-scrollbar, #inputList::-webkit-scrollbar { width: 8px; }
+#deviceList::-webkit-scrollbar-thumb, #inputList::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+#deviceList::-webkit-scrollbar-thumb:hover, #inputList::-webkit-scrollbar-thumb:hover { background: var(--faint); }
+
+/* Sorties / Entrées tabs in the devices card header */
+.seg-tabs {
+  display: flex; gap: 2px; flex: none; padding: 2px;
+  background: var(--card-2); border: 1px solid var(--border-soft); border-radius: 8px;
+}
+.seg-tab {
+  border: none; background: transparent; color: var(--muted); font: inherit;
+  font-size: 12px; padding: 3px 10px; border-radius: 6px; cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.seg-tab:hover { color: var(--text); }
+.seg-tab.active { background: var(--card); color: var(--text); }
+
+/* INPUTS tab: round check (single choice) + hint line under the list */
+.chk.radio .box { border-radius: 50%; }
+.badge.default { color: var(--green); border-color: rgba(61, 220, 132, 0.4); }
+#inputList input[type="range"] { flex: none; width: 84px; }
+#inputList .val { width: 44px; }
+#inputList .vu { flex: none; width: 64px; }
+.mic-mute { flex: none; padding: 4px 6px; }
+.mic-mute.on { color: var(--red); border-color: rgba(201, 67, 67, 0.45); }
+#inputsHint {
+  flex: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-soft);
+  color: var(--faint); font-size: 12px; line-height: 1.5;
+}
 .empty { color: var(--faint); text-align: center; padding: 28px 0; font-size: 13px; }
 
 .device {
@@ -481,7 +507,11 @@ footer kbd {
     <section class="card" id="devicesCard">
       <div class="card-head">
         <h2 id="devicesCardTitle">Enceintes du groupe</h2>
-        <div style="display:flex;gap:8px">
+        <div style="display:flex;gap:8px;align-items:center">
+          <div class="seg-tabs" id="devTabs">
+            <button class="seg-tab active" data-tab="outputs">Sorties</button>
+            <button class="seg-tab" data-tab="inputs">Entrées</button>
+          </div>
           <button class="ghost-btn" id="updateSetupBtn" style="display:none;padding:5px 9px">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
@@ -492,6 +522,7 @@ footer kbd {
         </div>
       </div>
       <div id="deviceList"></div>
+      <div id="inputList" style="display:none"></div>
       <div class="row" id="devicesToolbar">
         <button class="ghost-btn" id="calBtn"
                 title="Joue un tick régulier à travers le groupe : ajustez la latence de chaque enceinte jusqu'à ce que les ticks fusionnent">
@@ -511,6 +542,9 @@ footer kbd {
                title="Atténue toutes les enceintes proportionnellement, sans changer leur équilibre respectif">
         <span class="val" id="vMasterVol"></span>
       </div>
+      <div id="inputsHint" style="display:none">Le micro coché devient le micro par défaut de Windows,
+        immédiatement et à chaque application de ce setup. Aucun micro coché&nbsp;: le setup ne touche
+        pas au micro.</div>
     </section>
   </main>
 
@@ -564,7 +598,8 @@ const post = m => { if (bridge) bridge.postMessage(m); };
 
 let state = { running: false, starting: false, masterVolume: 100,
               toggleHotkey: "Ctrl+Alt+G", switcherHotkey: "Ctrl+Alt+S",
-              devices: [], setups: [], activeSetup: "", editingSetup: "", playingSetup: "" };
+              devices: [], setups: [], activeSetup: "", editingSetup: "", playingSetup: "",
+              inputs: [], setupMic: "" };
 let selectedId = null;
 const rowRefs = new Map(); // deviceId -> {row, vu, glitch, badges:{channel,vol,lat}}
 
@@ -800,6 +835,135 @@ function renderList() {
 
     rowRefs.set(d.id, { row, fill, glitch: bGl, badges: { ch: bCh, vol: bVol, lat: bLat, src: bSrc } });
     updateBadges(d);
+  }
+}
+
+// ---------- INPUTS tab (per-setup default microphone) ----------
+
+let devTab = "outputs"; // "outputs" | "inputs" -- UI-only, resets on launch
+
+function renderDevTab() {
+  for (const b of document.querySelectorAll("#devTabs .seg-tab")) {
+    b.classList.toggle("active", b.dataset.tab === devTab);
+  }
+  const outputs = devTab === "outputs";
+  $("#deviceList").style.display = outputs ? "" : "none";
+  $("#devicesToolbar").style.display = outputs ? "" : "none";
+  $("#inputList").style.display = outputs ? "none" : "";
+  $("#inputsHint").style.display = outputs ? "none" : "";
+}
+
+const MIC_ICON = `<svg ${KIND_ICON_ATTRS}><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>` +
+  '<path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>' +
+  '<line x1="8" y1="23" x2="16" y2="23"/></svg>';
+const MIC_OFF_ICON = `<svg ${KIND_ICON_ATTRS}><line x1="1" y1="1" x2="23" y2="23"/>` +
+  '<path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/>' +
+  '<path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/>' +
+  '<line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
+
+const inputRowRefs = new Map(); // captureId -> {row, fill}
+
+function renderInputs() {
+  const list = $("#inputList");
+  list.textContent = "";
+  inputRowRefs.clear();
+  const inputs = state.inputs || [];
+  if (!inputs.length) {
+    const e = document.createElement("div");
+    e.className = "empty";
+    e.textContent = "Aucun micro détecté. Branchez un périphérique d'entrée.";
+    list.appendChild(e);
+    return;
+  }
+  for (const inp of inputs) {
+    const row = document.createElement("div");
+    row.className = "device";
+    if (inp.muted) row.classList.add("is-muted");
+
+    const chk = document.createElement("label");
+    chk.className = "chk radio";
+    chk.title = "Micro de ce setup";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = inp.id === state.setupMic;
+    // The row's click handler does the work (backend confirms via a state
+    // resend); the input only drives the .box visual, so block its toggle.
+    cb.addEventListener("click", ev => ev.preventDefault());
+    const box = document.createElement("span");
+    box.className = "box";
+    chk.append(cb, box);
+
+    const main = document.createElement("div");
+    main.className = "dev-main";
+    const nameRow = document.createElement("div");
+    nameRow.className = "dev-name-row";
+    const kindIcon = document.createElement("span");
+    kindIcon.className = "dev-kind";
+    kindIcon.innerHTML = MIC_ICON;
+    const name = document.createElement("div");
+    name.className = "dev-name";
+    name.textContent = inp.name;
+    name.title = inp.name;
+    nameRow.append(kindIcon, name);
+    const meta = document.createElement("div");
+    meta.className = "dev-meta";
+    if (inp.default) {
+      const b = document.createElement("span");
+      b.className = "badge default";
+      b.textContent = "Défaut Windows";
+      b.title = "Micro par défaut actuel de Windows";
+      meta.appendChild(b);
+    }
+    main.append(nameRow, meta);
+
+    const right = document.createElement("div");
+    right.className = "dev-right";
+
+    const vol = document.createElement("input");
+    vol.type = "range";
+    vol.min = 0; vol.max = 100; vol.step = 1;
+    vol.value = inp.volume ?? 100;
+    vol.title = "Niveau d'entrée Windows de ce micro (toutes les applications)";
+    const val = document.createElement("span");
+    val.className = "val";
+    val.textContent = vol.value + " %";
+    vol.addEventListener("click", ev => ev.stopPropagation());
+    vol.addEventListener("input", () => {
+      val.textContent = vol.value + " %";
+      paintRange(vol);
+      post(`micvolume|${inp.id}|${vol.value}`);
+    });
+    vol.addEventListener("change", () => {
+      post("micvolcommit");
+      markModified();
+    });
+
+    const mute = document.createElement("button");
+    mute.className = "ghost-btn mic-mute" + (inp.muted ? " on" : "");
+    mute.innerHTML = inp.muted ? MIC_OFF_ICON : MIC_ICON;
+    mute.title = inp.muted ? "Réactiver ce micro (coupé pour tout Windows)"
+                           : "Couper ce micro pour tout Windows";
+    mute.addEventListener("click", ev => {
+      ev.stopPropagation();
+      post(`micmute|${inp.id}|${inp.muted ? 0 : 1}`);
+      markModified();
+    });
+
+    const vu = document.createElement("div");
+    vu.className = "vu";
+    const fill = document.createElement("div");
+    fill.className = "vu-fill";
+    vu.appendChild(fill);
+
+    right.append(vol, val, mute, vu);
+    row.append(chk, main, right);
+    row.addEventListener("click", () => {
+      post(`setupmic|${inp.id}`);
+      markModified();
+    });
+    list.appendChild(row);
+    inputRowRefs.set(inp.id, { row, fill });
+    paintRange(vol);
   }
 }
 
@@ -1231,6 +1395,7 @@ function renderAll() {
   if (selectedId && !device(selectedId)) selectedId = null;
   renderHeader();
   renderList();
+  renderInputs();
   renderEqCard();
   renderSetups();
   renderUpdateSetupButton();
@@ -1408,12 +1573,41 @@ function applyStatus(m) {
       r.glitch.hidden = true;
     }
   }
+  // INPUTS tab VU meters -- micPeaks is only populated while metering is on.
+  for (const [id, r] of inputRowRefs) {
+    const p = m.micPeaks && m.micPeaks.find(x => x.id === id);
+    const peak = p ? p.peak : 0;
+    const w = Math.sqrt(Math.min(1, Math.max(0, peak))) * 100;
+    r.fill.style.width = w.toFixed(1) + "%";
+    r.fill.classList.toggle("hot", peak > 0.85);
+  }
 }
 
 // ---------- Controls ----------
 
 $("#toggleBtn").addEventListener("click", () => post("toggle"));
 $("#refreshBtn").addEventListener("click", () => post("refresh"));
+
+$("#devTabs").addEventListener("click", ev => {
+  const btn = ev.target.closest(".seg-tab");
+  if (!btn || btn.dataset.tab === devTab) return;
+  devTab = btn.dataset.tab;
+  renderDevTab();
+  post(`micmeter|${devTab === "inputs" ? 1 : 0}`);
+});
+
+// Mic metering holds capture streams open (Windows shows "micro en cours
+// d'utilisation"), so it must not survive the window being hidden to tray.
+document.addEventListener("visibilitychange", () => {
+  if (devTab !== "inputs") return;
+  post(`micmeter|${document.hidden ? 0 : 1}`);
+});
+// Backstop for the tray round-trip: the native side force-stops metering
+// when the window hides (the suspension can race our visibilitychange
+// message), so re-assert it when the window comes back to the foreground.
+window.addEventListener("focus", () => {
+  if (devTab === "inputs" && !document.hidden) post("micmeter|1");
+});
 
 $("#sMasterVol").addEventListener("input", () => {
   const el = $("#sMasterVol");
