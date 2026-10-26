@@ -29,7 +29,18 @@ endforeach()
 
 add_executable(AudioLinker WIN32
     src/main.cpp
+    # GUI side, one file per concern (shared declarations in src/App.h)
     src/Gui.cpp
+    src/AppState.cpp
+    src/Devices.cpp
+    src/Group.cpp
+    src/Hotkeys.cpp
+    src/SystemAudio.cpp
+    src/WebBridge.cpp
+    src/Switcher.cpp
+    src/Optimizer.cpp
+    src/OptionsWindow.cpp
+    src/Tray.cpp
     src/DeviceManager.cpp
     src/AudioEngine.cpp
     src/Calibrator.cpp
