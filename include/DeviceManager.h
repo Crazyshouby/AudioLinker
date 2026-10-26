@@ -15,7 +15,6 @@ struct AudioDeviceInfo {
     std::wstring id;
     std::wstring name;
     bool isDefault = false;
-    bool isRender = false; // true = output (playback), false = capture (input)
     AudioDeviceKind kind = AudioDeviceKind::Speaker;
 };
 
@@ -23,8 +22,6 @@ class DeviceManager {
 public:
     DeviceManager();
     ~DeviceManager();
-
-    bool isValid() const { return enumerator_ != nullptr; }
 
     std::vector<AudioDeviceInfo> enumerateRenderDevices();
     std::vector<AudioDeviceInfo> enumerateCaptureDevices();

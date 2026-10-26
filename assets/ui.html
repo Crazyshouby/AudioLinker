@@ -399,22 +399,6 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.05); }
 .text-input:focus { border-color: var(--accent); }
 .text-input:disabled { opacity: 0.45; }
 .text-input::placeholder { color: var(--faint); }
-/* The .row > label width rule (made for slider labels) must not stretch the
-   switch pill: the knob's checked position assumes exactly 40px. */
-.switch, .row > label.switch { position: relative; width: 40px; height: 22px; flex: none; cursor: pointer; }
-.switch input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
-.track {
-  position: absolute; inset: 0; border-radius: 11px; background: var(--card-2);
-  border: 1px solid var(--border); transition: all 0.2s; pointer-events: none;
-}
-.track::after {
-  content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
-  border-radius: 50%; background: var(--faint); transition: all 0.2s;
-}
-.switch input:checked + .track { background: var(--accent); border-color: var(--accent); }
-.switch input:checked + .track::after { left: 20px; background: #fff; }
-.switch-label, .row > label.switch-label { width: auto; flex: 1; font-size: 13px; color: var(--muted); cursor: pointer; }
-
 /* ---------- Mic calibration modal ---------- */
 .cal-row { display: flex; align-items: center; gap: 10px; padding: 6px 2px; font-size: 13px; }
 .cal-row .cal-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1686,8 +1670,6 @@ $("#calBtn").addEventListener("click", () => setCalibration(!calTimer));
 // This modal only picks the input and shows per-output progress ("cal"
 // messages, sent every 250ms while the pass runs).
 
-let calRunning = false;
-
 function renderCalRows(m) {
   const box = $("#calResults");
   box.textContent = "";
@@ -1744,7 +1726,6 @@ function openCalModal() {
 }
 
 function applyCal(m) {
-  calRunning = m.running;
   $("#calStartBtn").style.display = m.running ? "none" : "";
   $("#calCancelBtn").style.display = m.running ? "" : "none";
   $("#calMicSelect").disabled = m.running;

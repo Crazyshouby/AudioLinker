@@ -10,6 +10,7 @@ add_executable(AudioLinker WIN32
     src/DeviceManager.cpp
     src/AudioEngine.cpp
     src/Calibrator.cpp
+    src/WasapiStream.cpp
     src/Log.cpp
     assets/AudioLinker.rc
     # CMake merges .manifest sources into the exe's embedded manifest via
@@ -39,7 +40,6 @@ target_link_libraries(AudioLinker PRIVATE
     avrt
     shell32
     dwmapi
-    version
     advapi32
     comdlg32 # GetSaveFileNameW/GetOpenFileNameW (Options: export/import config)
     shcore # GetDpiForMonitor (initial window size on the cursor's monitor)

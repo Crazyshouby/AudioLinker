@@ -1,14 +1,14 @@
 #include "AudioEngine.h"
+#include "ComUtil.h"
 #include "Resampler.h"
 #include "Eq.h"
 #include "Log.h"
+#include "WasapiStream.h"
 
 #include <mmdeviceapi.h>
 #include <audioclient.h>
 #include <audioclientactivationparams.h>
-#include <audiopolicy.h>
 #include <endpointvolume.h>
-#include <ksmedia.h>
 #include <wrl/client.h>
 #include <avrt.h>
 #include <timeapi.h>
@@ -21,23 +21,6 @@
 using Microsoft::WRL::ComPtr;
 
 namespace {
-
-bool isFloatFormat(const WAVEFORMATEX* wfx) {
-    if (wfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) return true;
-    if (wfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE) {
-        const auto* ext = reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(wfx);
-        return ext->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
-    }
-    return false;
-}
-
-// The convert paths below only handle float32 and 16-bit PCM. Shared-mode
-// mix formats are float32 in practice, so this should never trip -- but if
-// a driver ever hands back something else (24/32-bit int PCM), refusing it
-// beats reinterpreting its samples as int16 and playing corrupted noise.
-bool isSupportedFormat(const WAVEFORMATEX* wfx) {
-    return isFloatFormat(wfx) || wfx->wBitsPerSample == 16;
-}
 
 // Linear fade-in applied to the first few ms of audio played right after a
 // hard drift-correction drop, so the jump to a different point in the stream
@@ -62,17 +45,6 @@ inline float SoftClip(float x) {
     if (y > 1.0f) y = 1.0f;
     return x < 0.0f ? -y : y;
 }
-
-struct ComScope {
-    bool ownsInit = false;
-    ComScope() {
-        HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        ownsInit = (hr == S_OK || hr == S_FALSE);
-    }
-    ~ComScope() {
-        if (ownsInit) CoUninitialize();
-    }
-};
 
 // Without this, Sleep(10) in the capture loop is bound by the default system
 // timer granularity (commonly ~15ms on modern Windows when nothing has
@@ -101,14 +73,6 @@ HANDLE EnableProAudioMmcss() {
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
     }
     return mmcssHandle;
-}
-
-ComPtr<IMMDeviceEnumerator> CreateDeviceEnumerator() {
-    ComPtr<IMMDeviceEnumerator> enumerator;
-    CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
-                     __uuidof(IMMDeviceEnumerator),
-                     reinterpret_cast<void**>(enumerator.GetAddressOf()));
-    return enumerator;
 }
 
 // Ring-buffer cushion (in samples, i.e. frames * channels) kept on top of an
@@ -543,29 +507,16 @@ void AudioEngine::identifyOutput(const std::wstring& deviceId) {
 
         auto enumerator = CreateDeviceEnumerator();
         if (!enumerator) return;
-        ComPtr<IMMDevice> device;
-        if (FAILED(enumerator->GetDevice(deviceId.c_str(), device.GetAddressOf()))) return;
-
-        ComPtr<IAudioClient> audioClient;
-        if (FAILED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
-                                     reinterpret_cast<void**>(audioClient.GetAddressOf())))) {
-            return;
-        }
-
-        WAVEFORMATEX* mixFormat = nullptr;
-        if (FAILED(audioClient->GetMixFormat(&mixFormat)) || !mixFormat) return;
-        if (!isSupportedFormat(mixFormat)) {
-            CoTaskMemFree(mixFormat);
-            return;
-        }
-        int channels = mixFormat->nChannels;
-        int sampleRate = mixFormat->nSamplesPerSec;
-        bool dstIsFloat = isFloatFormat(mixFormat);
+        SharedClient sc;
+        if (!OpenSharedClient(enumerator.Get(), deviceId, sc, L"identify")) return;
+        const int channels = sc.format.channels;
+        const int sampleRate = sc.format.rate;
+        IAudioClient* audioClient = sc.client.Get();
 
         constexpr REFERENCE_TIME kBufferDuration = 3'000'000; // 300ms, in 100ns units
-        HRESULT hr = audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, kBufferDuration, 0, mixFormat, nullptr);
-        CoTaskMemFree(mixFormat);
-        if (FAILED(hr)) return;
+        if (FAILED(audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, kBufferDuration, 0, sc.mix, nullptr))) {
+            return;
+        }
 
         ComPtr<IAudioRenderClient> renderClient;
         if (FAILED(audioClient->GetService(__uuidof(IAudioRenderClient),
@@ -585,6 +536,7 @@ void AudioEngine::identifyOutput(const std::wstring& deviceId) {
         if (FAILED(audioClient->Start())) return;
         double phase = 0.0;
         constexpr double kTwoPi = 2.0 * 3.14159265358979323846;
+        std::vector<float> tone;
         for (const auto& beep : beeps) {
             int framesTotal = sampleRate * beep.ms / 1000;
             int framesWritten = 0;
@@ -596,22 +548,16 @@ void AudioEngine::identifyOutput(const std::wstring& deviceId) {
                 if (framesAvailable == 0) { Sleep(5); continue; }
                 BYTE* buf = nullptr;
                 if (FAILED(renderClient->GetBuffer(framesAvailable, &buf))) break;
-                for (UINT32 f = 0; f < framesAvailable; ++f) {
-                    float sample = 0.0f;
-                    if (beep.freq > 0.0) {
-                        sample = 0.25f * static_cast<float>(std::sin(phase));
+                tone.assign(static_cast<size_t>(framesAvailable) * channels, 0.0f);
+                if (beep.freq > 0.0) {
+                    for (UINT32 f = 0; f < framesAvailable; ++f) {
+                        float sample = 0.25f * static_cast<float>(std::sin(phase));
                         phase += kTwoPi * beep.freq / sampleRate;
                         if (phase > kTwoPi) phase -= kTwoPi;
-                    }
-                    for (int c = 0; c < channels; ++c) {
-                        if (dstIsFloat) {
-                            reinterpret_cast<float*>(buf)[f * channels + c] = sample;
-                        } else {
-                            reinterpret_cast<int16_t*>(buf)[f * channels + c] =
-                                static_cast<int16_t>(sample * 32767.0f);
-                        }
+                        for (int c = 0; c < channels; ++c) tone[static_cast<size_t>(f) * channels + c] = sample;
                     }
                 }
+                FromFloat(tone.data(), tone.size(), sc.format, buf);
                 renderClient->ReleaseBuffer(framesAvailable, 0);
                 framesWritten += framesAvailable;
             }
@@ -644,35 +590,21 @@ void AudioEngine::startMicMetering(const std::vector<std::wstring>& deviceIds) {
 
         struct Stream {
             MicMeterEntry* entry = nullptr;
-            ComPtr<IAudioClient> client;
+            SharedClient sc;
             ComPtr<IAudioCaptureClient> capture;
-            int channels = 2;
-            bool isFloat = true;
         };
         std::vector<Stream> streams;
         for (auto& e : *bank) {
             Stream s;
             s.entry = e.get();
-            ComPtr<IMMDevice> device;
-            if (FAILED(enumerator->GetDevice(e->deviceId.c_str(), device.GetAddressOf()))) continue;
-            if (FAILED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
-                                         reinterpret_cast<void**>(s.client.GetAddressOf())))) {
+            if (!OpenSharedClient(enumerator.Get(), e->deviceId, s.sc, L"VU micro")) continue;
+            if (FAILED(s.sc.client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0,
+                                               2'000'000 /*200ms*/, 0, s.sc.mix, nullptr))) continue;
+            if (FAILED(s.sc.client->GetService(__uuidof(IAudioCaptureClient),
+                                                reinterpret_cast<void**>(s.capture.GetAddressOf())))) {
                 continue;
             }
-            WAVEFORMATEX* mix = nullptr;
-            if (FAILED(s.client->GetMixFormat(&mix)) || !mix) continue;
-            if (!isSupportedFormat(mix)) { CoTaskMemFree(mix); continue; }
-            s.channels = mix->nChannels;
-            s.isFloat = isFloatFormat(mix);
-            HRESULT hr = s.client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0,
-                                              2'000'000 /*200ms*/, 0, mix, nullptr);
-            CoTaskMemFree(mix);
-            if (FAILED(hr)) continue;
-            if (FAILED(s.client->GetService(__uuidof(IAudioCaptureClient),
-                                             reinterpret_cast<void**>(s.capture.GetAddressOf())))) {
-                continue;
-            }
-            if (FAILED(s.client->Start())) continue;
+            if (FAILED(s.sc.client->Start())) continue;
             streams.push_back(std::move(s));
         }
 
@@ -688,16 +620,8 @@ void AudioEngine::startMicMetering(const std::vector<std::wstring>& deviceIds) {
                     DWORD flags = 0;
                     if (FAILED(s.capture->GetBuffer(&data, &frames, &flags, nullptr, nullptr))) break;
                     if (!(flags & AUDCLNT_BUFFERFLAGS_SILENT) && data) {
-                        size_t n = static_cast<size_t>(frames) * s.channels;
-                        if (s.isFloat) {
-                            const float* f = reinterpret_cast<const float*>(data);
-                            for (size_t i = 0; i < n; ++i) peak = std::max(peak, std::abs(f[i]));
-                        } else {
-                            const int16_t* p = reinterpret_cast<const int16_t*>(data);
-                            for (size_t i = 0; i < n; ++i) {
-                                peak = std::max(peak, std::abs(p[i]) / 32768.0f);
-                            }
-                        }
+                        peak = std::max(peak, PeakAbs(data, static_cast<size_t>(frames) * s.sc.format.channels,
+                                                      s.sc.format));
                     }
                     s.capture->ReleaseBuffer(frames);
                 }
@@ -707,7 +631,7 @@ void AudioEngine::startMicMetering(const std::vector<std::wstring>& deviceIds) {
             }
             Sleep(50);
         }
-        for (auto& s : streams) s.client->Stop();
+        for (auto& s : streams) s.sc.client->Stop();
     });
 }
 
@@ -799,10 +723,10 @@ AudioEngine::CaptureSessionEnd AudioEngine::runCaptureSession(
         const std::wstring& masterVolumeDeviceId,
         unsigned long sourcePid, bool firstSession) {
     ComPtr<IMMDeviceEnumerator> enumerator;
-    ComPtr<IMMDevice> device;
+    SharedClient sc; // device mode only
     ComPtr<IAudioClient> audioClient;
     ComPtr<IAudioCaptureClient> captureClient;
-    WAVEFORMATEX* mixFormat = nullptr;
+    StreamFormat srcFmt;
     HANDLE captureEvent = nullptr;
     const bool processMode = (sourcePid != 0);
     bool ok = false;
@@ -856,17 +780,16 @@ AudioEngine::CaptureSessionEnd AudioEngine::runCaptureSession(
                                                 AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
                                                 200000, 0, &processFmt, nullptr))) break;
             if (FAILED(audioClient->SetEventHandle(captureEvent))) break;
+            srcFmt = DescribeFormat(&processFmt);
         } else {
-            if (FAILED(enumerator->GetDevice(sourceId.c_str(), device.GetAddressOf()))) break;
-            if (FAILED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
-                                         reinterpret_cast<void**>(audioClient.GetAddressOf())))) break;
-            if (FAILED(audioClient->GetMixFormat(&mixFormat))) break;
-            if (!isSupportedFormat(mixFormat)) break;
+            if (!OpenSharedClient(enumerator.Get(), sourceId, sc, L"capture système")) break;
+            audioClient = sc.client;
+            srcFmt = sc.format;
 
             DWORD streamFlags = loopback ? AUDCLNT_STREAMFLAGS_LOOPBACK : 0;
             REFERENCE_TIME bufferDuration = 1500000; // 150ms: margin for the polling loop under CPU load
             if (FAILED(audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, streamFlags,
-                                                bufferDuration, 0, mixFormat, nullptr))) break;
+                                                bufferDuration, 0, sc.mix, nullptr))) break;
         }
         if (FAILED(audioClient->GetService(__uuidof(IAudioCaptureClient),
                                             reinterpret_cast<void**>(captureClient.GetAddressOf())))) break;
@@ -878,7 +801,6 @@ AudioEngine::CaptureSessionEnd AudioEngine::runCaptureSession(
         LOG_ERROR(processMode
             ? L"Capture par application (PID " + std::to_wstring(sourcePid) + L") impossible à démarrer."
             : L"Capture système (câble virtuel) impossible à démarrer.");
-        if (mixFormat) CoTaskMemFree(mixFormat);
         if (captureEvent) CloseHandle(captureEvent);
         if (firstSession) reportCaptureInit(false);
         return CaptureSessionEnd::InitFailed;
@@ -902,20 +824,8 @@ AudioEngine::CaptureSessionEnd AudioEngine::runCaptureSession(
         volCallbackRegistered = SUCCEEDED(endpointVolume->RegisterControlChangeNotify(&volCallback));
     }
 
-    bool srcIsFloat;
-    int srcChannels, srcRate;
-    if (processMode) {
-        srcIsFloat = true;
-        srcChannels = processFmt.nChannels;
-        srcRate = static_cast<int>(processFmt.nSamplesPerSec);
-    } else {
-        srcIsFloat = isFloatFormat(mixFormat);
-        srcChannels = mixFormat->nChannels;
-        srcRate = mixFormat->nSamplesPerSec;
-        CoTaskMemFree(mixFormat);
-        mixFormat = nullptr;
-    }
-
+    const int srcChannels = srcFmt.channels;
+    const int srcRate = srcFmt.rate;
 
     // Output formats are known here: start() waits for every render thread's
     // formatReady before spawning this thread. Only this source's outputs
@@ -1022,13 +932,8 @@ AudioEngine::CaptureSessionEnd AudioEngine::runCaptureSession(
             floatBuf.resize(static_cast<size_t>(numFrames) * srcChannels);
             if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
                 std::fill(floatBuf.begin(), floatBuf.end(), 0.0f);
-            } else if (srcIsFloat) {
-                memcpy(floatBuf.data(), data, floatBuf.size() * sizeof(float));
             } else {
-                const int16_t* src = reinterpret_cast<const int16_t*>(data);
-                for (size_t i = 0; i < floatBuf.size(); ++i) {
-                    floatBuf[i] = src[i] / 32768.0f;
-                }
+                ToFloat(data, floatBuf.size(), srcFmt, floatBuf.data());
             }
 
             captureClient->ReleaseBuffer(numFrames);
@@ -1137,13 +1042,12 @@ bool InitLowLatencyRender(IAudioClient* client, const WAVEFORMATEX* fmt, HANDLE 
 
 AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, bool firstSession) {
     ComPtr<IMMDeviceEnumerator> enumerator;
-    ComPtr<IMMDevice> device;
-    ComPtr<IAudioClient> audioClient;
+    SharedClient sc;
+    IAudioClient* audioClient = nullptr; // = sc.client once opened
     ComPtr<IAudioRenderClient> renderClient;
     ComPtr<IAudioClock> audioClock;
     UINT64 clockFreq = 0;
     UINT64 framesWritten = 0; // total frames submitted this session
-    WAVEFORMATEX* mixFormat = nullptr;
     UINT32 bufferFrameCount = 0;
     // Auto-reset: WASAPI signals it once per device period (~10ms) when
     // buffer space is available, replacing the old Sleep(5) polling loop.
@@ -1154,22 +1058,13 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
         if (!renderEvent) break;
         enumerator = CreateDeviceEnumerator();
         if (!enumerator) break;
-        HRESULT hrGet = enumerator->GetDevice(state->deviceId.c_str(), device.GetAddressOf());
-        if (FAILED(hrGet)) { LOG_ERROR(L"GetDevice (rendu) : " + log_detail::Hr(hrGet)); break; }
-        HRESULT hrAct = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
-                                         reinterpret_cast<void**>(audioClient.GetAddressOf()));
-        if (FAILED(hrAct)) { LOG_ERROR(L"Activate IAudioClient (rendu) : " + log_detail::Hr(hrAct)); break; }
-        if (FAILED(audioClient->GetMixFormat(&mixFormat))) break;
-        if (!isSupportedFormat(mixFormat)) {
-            LOG_WARN(L"Format non géré sur une sortie (bits/éch = " +
-                     std::to_wstring(mixFormat->wBitsPerSample) + L") — sortie ignorée.");
-            break;
-        }
+        if (!OpenSharedClient(enumerator.Get(), state->deviceId, sc, L"rendu")) break;
+        audioClient = sc.client.Get();
 
-        state->channels = mixFormat->nChannels;
-        state->sampleRate = mixFormat->nSamplesPerSec;
+        state->channels = sc.format.channels;
+        state->sampleRate = sc.format.rate;
 
-        if (!InitLowLatencyRender(audioClient.Get(), mixFormat, renderEvent, &bufferFrameCount,
+        if (!InitLowLatencyRender(audioClient, sc.mix, renderEvent, &bufferFrameCount,
                                   state->deviceId, lowLatency_.load())) break;
         if (FAILED(audioClient->GetService(__uuidof(IAudioRenderClient),
                                             reinterpret_cast<void**>(renderClient.GetAddressOf())))) break;
@@ -1182,7 +1077,7 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
         // allocation): anything above the target would just be extra
         // one-time latency that the capped fill loop then drains anyway.
         UINT32 prerollFrames = static_cast<UINT32>(
-            static_cast<int64_t>(deviceFillMs_.load()) * mixFormat->nSamplesPerSec / 1000);
+            static_cast<int64_t>(deviceFillMs_.load()) * sc.format.rate / 1000);
         if (prerollFrames > bufferFrameCount) prerollFrames = bufferFrameCount;
         BYTE* data = nullptr;
         if (FAILED(renderClient->GetBuffer(prerollFrames, &data))) break;
@@ -1215,14 +1110,11 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
     } while (false);
 
     if (!ok) {
-        if (mixFormat) CoTaskMemFree(mixFormat);
         if (renderEvent) CloseHandle(renderEvent);
         return RenderSessionEnd::InitFailed;
     }
 
-    bool dstIsFloat = isFloatFormat(mixFormat);
-    CoTaskMemFree(mixFormat);
-    mixFormat = nullptr;
+    const StreamFormat dstFmt = sc.format;
 
     state->active = true;
     std::vector<float> scratch;
@@ -1438,15 +1330,7 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
                        !state->peakMilli.compare_exchange_weak(prevPeak, pkMilli)) {
                 }
 
-                if (dstIsFloat) {
-                    memcpy(buf, scratch.data(), scratch.size() * sizeof(float));
-                } else {
-                    int16_t* dst = reinterpret_cast<int16_t*>(buf);
-                    for (size_t i = 0; i < scratch.size(); ++i) {
-                        float v = std::clamp(scratch[i], -1.0f, 1.0f);
-                        dst[i] = static_cast<int16_t>(v * 32767.0f);
-                    }
-                }
+                FromFloat(scratch.data(), scratch.size(), dstFmt, buf);
                 renderClient->ReleaseBuffer(framesAvailable, 0);
                 framesWritten += framesAvailable;
             }
