@@ -46,3 +46,11 @@ target_link_libraries(AudioLinker PRIVATE
     runtimeobject # RoGetActivationFactory/HSTRING (per-app endpoint routing)
     ${WEBVIEW2_NATIVE}/x64/WebView2LoaderStatic.lib
 )
+
+# Unit tests (pure DSP/containers, see tests/). ON by default: they add a few
+# tiny executables and run in well under a second via ctest.
+option(AUDIOLINKER_BUILD_TESTS "Build the unit tests" ON)
+if(AUDIOLINKER_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
