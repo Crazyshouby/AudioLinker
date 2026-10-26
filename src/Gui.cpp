@@ -4,6 +4,8 @@
 #include "Calibrator.h"
 #include "Log.h"
 #include "PolicyConfig.h"
+#include "Config.h"
+#include "Utf8.h"
 #include "resource.h"
 #include "version.h"
 
@@ -21,9 +23,12 @@
 #include <wrl.h>
 #include <wrl/client.h>
 #include <WebView2.h>
+#include <nlohmann/json.hpp>
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
+#include <ctime>
 #include <map>
 #include <memory>
 #include <set>
@@ -37,8 +42,15 @@
 
 using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
+using json = nlohmann::ordered_json;
 
 namespace {
+
+// Everything persisted (see Config.h) and its store. Loaded once in
+// RunApplication before any window exists; written back on a short timer
+// after each change (SaveConfig) and flushed at exit (FlushConfig).
+ConfigStore g_store;
+AppConfig g_cfg;
 
 // Tray menu
 constexpr int ID_TRAY_SHOW = 201;
@@ -63,6 +75,10 @@ constexpr UINT_PTR IDT_HK_CAPTURE = 5;
 constexpr int kHotkeyCaptureTimeoutMs = 10000;
 // Delay between a resume-from-sleep notification and the group restart.
 constexpr UINT_PTR IDT_RESUME = 6;
+// Deferred config write (see SaveConfig): coalesces the burst of changes a
+// slider drag or a setup apply produces into one file write.
+constexpr UINT_PTR IDT_SAVE = 7;
+constexpr int kSaveDelayMs = 500;
 constexpr UINT WM_TRAYICON = WM_APP + 1;
 constexpr UINT WM_DEVICES_CHANGED = WM_APP + 2;
 // Windows' default render endpoint changed (see DeviceNotificationClient).
@@ -112,8 +128,8 @@ bool IsWindowsLightThemeEnabled() {
 }
 
 // 0 = auto (follow Windows), 1 = forced light, 2 = forced dark -- see the
-// Options window's theme selector. Persisted as ini key [group]/theme.
-int g_themeOverride = 0;
+// Options window's theme selector.
+int& g_themeOverride = g_cfg.theme;
 
 // What every theme-driven decision (native chrome + the web content's
 // data-theme attribute) should actually use instead of the raw OS reading.
@@ -129,48 +145,7 @@ COLORREF WindowBgForTheme(bool light) {
     return light ? RGB(0xD4, 0xD5, 0xD9) : RGB(0x0E, 0x10, 0x13);
 }
 
-struct OutputSettings {
-    bool checked = false;
-    int latencyMs = 0;
-    int channelMode = 0; // 0 = stéréo, 1 = gauche, 2 = droite
-    int volumePercent = 100;
-    std::array<int, kEqBandCount> eqDb{}; // per-band gain, -12..+12 dB each
-    bool muted = false;
-    // Position in the user-arranged list (drag & drop). Devices never
-    // reordered keep this default and sort after the arranged ones, in
-    // enumeration order.
-    int order = 1000000;
-    // System name last seen for this endpoint id -- the key for recognizing
-    // the same device back under a new id (see PopulateOutputList).
-    std::wstring name;
-    // User-chosen display name; empty = show the system name. Cosmetic only,
-    // deliberately not part of setups (renaming survives applying a preset).
-    std::wstring alias;
-    // User-chosen accent color for this speaker's row/icon (e.g. "e07a5f");
-    // empty = use the default kind-based color. Same treatment as alias --
-    // device-level, survives applying a setup saved at another time.
-    std::wstring colorHex;
-    // Per-speaker source: 0 = system-wide capture (virtual cable), otherwise
-    // the PID of the app captured for this speaker. Runtime-only (PIDs don't
-    // survive a reboot), hence neither persisted nor stored in setups.
-    DWORD sourcePid = 0;
-};
-
-// A named snapshot of a full group configuration: every device known at save
-// time with its checked state and settings. Applying one replaces the current
-// selection wholesale (devices absent from the setup get unchecked).
-struct Setup {
-    std::wstring name;
-    std::vector<std::pair<std::wstring, OutputSettings>> devices;
-    // Capture endpoint made the Windows default mic when this setup is
-    // applied. Empty = this setup leaves the default mic alone.
-    std::wstring micId;
-    // Windows input level/mute of that mic, snapshotted at save time and
-    // re-applied with it. micVolume -1 = saved before this existed (or no
-    // mic): leave the level alone.
-    int micVolume = -1;
-    bool micMute = false;
-};
+// OutputSettings / Setup live in Config.h with the rest of the persisted state.
 
 std::unique_ptr<DeviceManager> g_deviceManager;
 AudioEngine g_engine;
@@ -196,35 +171,37 @@ constexpr int kOptStepMs = 20;
 constexpr int kOptWindowMs = 3500;
 constexpr int kOptMaxTicks = 60; // hard stop (~3.5min) against any pathological loop
 std::vector<AudioDeviceInfo> g_outputDevices;
-std::map<std::wstring, OutputSettings> g_settings;
-std::vector<Setup> g_setups;
+// Short names for the persisted pieces the GUI code touches constantly.
+auto& g_settings = g_cfg.devices;
+auto& g_setups = g_cfg.setups;
 // Name of the last setup applied/saved, highlighted in the UI. Cleared as
 // soon as any individual setting is touched: the current state no longer
 // matches the preset, so keeping it highlighted would lie.
-std::wstring g_activeSetup;
+std::wstring& g_activeSetup = g_cfg.activeSetup;
 // Unlike g_activeSetup, this does NOT clear on divergence -- it's the setup a
 // "save changes" button in the UI would overwrite, so it must survive the
 // very edits that make it useful (checking a device, tweaking a slider...).
 // Set alongside g_activeSetup by ApplySetup()/SaveSetupFromCurrent(); only a
 // different setup being applied/saved, or this one being deleted, changes it.
-std::wstring g_editingSetup;
+std::wstring& g_editingSetup = g_cfg.editingSetup;
 // The setup whose config the engine is actually running, set when a group
 // (successfully) starts and cleared on stop. Deliberately distinct from
 // g_activeSetup: selecting a setup for editing (SelectSetup()) reassigns
 // g_activeSetup without touching playback, so it alone can't tell the UI
 // which row's play button should show "stop".
 std::wstring g_playingSetup;
-std::wstring g_previousDefaultId;
-std::wstring g_configPath;
-bool g_autostart = false;
+// Default output displaced by the running group (persisted so a crash can be
+// repaired at the next launch -- see RepairAfterCrash). Empty = none.
+std::wstring& g_previousDefaultId = g_cfg.previousDefault;
+bool& g_autostart = g_cfg.autostart;
 // Live attenuation applied on top of every output's own volume (which stays
-// unchanged in g_settings/the ini) -- lets one slider duck the whole group
-// without losing the balance set between speakers.
-int g_masterVolumePercent = 100;
+// unchanged in g_settings/the config) -- lets one slider duck the whole
+// group without losing the balance set between speakers.
+int& g_masterVolumePercent = g_cfg.masterVolume;
 // Mic tied to the current live configuration (INPUTS tab): snapshotted into
 // setups on save, restored from them on apply (where it also becomes the
 // Windows default capture device). Empty = don't manage the default mic.
-std::wstring g_setupMicId;
+std::wstring& g_setupMicId = g_cfg.micId;
 // Mic VU metering is on (INPUTS tab visible). Drives who owns
 // IDT_STATUS_TIMER alongside g_statusTimerForGroup: the timer runs when
 // either wants it, and each stop path only kills it if the other is done.
@@ -236,28 +213,28 @@ bool g_statusTimerForGroup = false;
 // Mirrors AudioEngine's base ring-buffer cushion (kDefaultBaseCushionMs) so
 // it can be edited from the UI and persisted -- see the "cushion"/
 // "cushioncommit" web commands.
-int g_baseCushionMs = kDefaultBaseCushionMs;
+int& g_baseCushionMs = g_cfg.cushionMs;
 // Mirrors AudioEngine's device-buffer fill target (kDefaultDeviceFillMs) --
 // see the "devicefill"/"devicefillcommit" web commands. Cushion + fill is
 // the bulk of the group's total latency vs. native playback.
-int g_deviceFillMs = kDefaultDeviceFillMs;
+int& g_deviceFillMs = g_cfg.deviceFillMs;
 // Low-latency period toggle (IAudioClient3) -- see AudioEngine::setLowLatency
-// and the "lowlatency" web command. Persisted as [group]/lowlatency.
-bool g_lowLatency = false;
+// and the "lowlatency" web command.
+bool& g_lowLatency = g_cfg.lowLatency;
 // Ctrl+Maj+1..9 apply setup #1..9 directly -- optional, since those combos
 // are also used by Office, editors... (see UpdateSetupDigitHotkeys).
-bool g_setupDigitHotkeys = true;
+bool& g_setupDigitHotkeys = g_cfg.setupDigitHotkeys;
 // Toasts (error/info JSON) posted while the main window was hidden: the
 // suspended page never saw them, so they are replayed by RestoreFromTray.
 std::vector<std::wstring> g_pendingJson;
 // When this app itself last changed Windows' default output: default-change
 // notifications inside that window are our own doing, not the user's.
 ULONGLONG g_lastDefaultChangeTick = 0;
-// Customizable global hotkeys (see FormatHotkey/RebindHotkey/LoadHotkeysFromIni).
-UINT g_toggleHotkeyMods = MOD_CONTROL | MOD_ALT;
-UINT g_toggleHotkeyVk = 'G';
-UINT g_switcherHotkeyMods = MOD_CONTROL | MOD_ALT;
-UINT g_switcherHotkeyVk = 'S';
+// Customizable global hotkeys (see FormatHotkey/RebindHotkey).
+UINT& g_toggleHotkeyMods = g_cfg.toggleMods;
+UINT& g_toggleHotkeyVk = g_cfg.toggleVk;
+UINT& g_switcherHotkeyMods = g_cfg.switcherMods;
+UINT& g_switcherHotkeyVk = g_cfg.switcherVk;
 // Native hotkey-capture state (see HotkeyCaptureHookProc): non-zero while
 // waiting for the next combo, holding which binding it'll go to.
 HHOOK g_hotkeyCaptureHook = nullptr;
@@ -419,69 +396,21 @@ bool IsCableDevice(const std::wstring& name) {
            name.find(L"CABLE Output") != std::wstring::npos;
 }
 
-// --- Config persistence (INI in %APPDATA%) ---
+// --- Config persistence (JSON in %APPDATA%\AudioLinker, see Config.h) ---
 
-void InitConfigPath() {
-    wchar_t buf[MAX_PATH] = {};
-    if (GetEnvironmentVariableW(L"APPDATA", buf, MAX_PATH) > 0) {
-        g_configPath = std::wstring(buf) + L"\\AudioLinker.ini";
-    } else {
-        g_configPath = L"AudioLinker.ini";
-    }
+// Writes g_cfg now. Reserved for the few changes that must survive a crash
+// right away (the displaced default output, routed apps) and for exit.
+void FlushConfig() {
+    if (g_mainWnd) KillTimer(g_mainWnd, IDT_SAVE);
+    g_store.save(g_cfg);
 }
 
+// Schedules a write shortly: every setting change calls this, and a burst
+// of them (slider drag, setup apply) still costs one file write.
 void SaveConfig() {
-    if (g_configPath.empty()) return;
-    WritePrivateProfileStringW(L"group", L"autostart", g_autostart ? L"1" : L"0", g_configPath.c_str());
-    WritePrivateProfileStringW(L"group", L"mastervolume", std::to_wstring(g_masterVolumePercent).c_str(),
-                               g_configPath.c_str());
-    WritePrivateProfileStringW(L"group", L"micid", g_setupMicId.c_str(), g_configPath.c_str());
-    WritePrivateProfileStringW(L"group", L"cushionms", std::to_wstring(g_baseCushionMs).c_str(),
-                               g_configPath.c_str());
-    WritePrivateProfileStringW(L"group", L"devicefillms", std::to_wstring(g_deviceFillMs).c_str(),
-                               g_configPath.c_str());
-    WritePrivateProfileStringW(L"group", L"lowlatency", g_lowLatency ? L"1" : L"0",
-                               g_configPath.c_str());
-    WritePrivateProfileStringW(L"group", L"theme", std::to_wstring(g_themeOverride).c_str(),
-                               g_configPath.c_str());
-    WritePrivateProfileStringW(L"hotkeys", L"togglemods", std::to_wstring(g_toggleHotkeyMods).c_str(),
-                               g_configPath.c_str());
-    WritePrivateProfileStringW(L"hotkeys", L"togglevk", std::to_wstring(g_toggleHotkeyVk).c_str(),
-                               g_configPath.c_str());
-    WritePrivateProfileStringW(L"hotkeys", L"switchermods", std::to_wstring(g_switcherHotkeyMods).c_str(),
-                               g_configPath.c_str());
-    WritePrivateProfileStringW(L"hotkeys", L"switchervk", std::to_wstring(g_switcherHotkeyVk).c_str(),
-                               g_configPath.c_str());
-    WritePrivateProfileStringW(L"hotkeys", L"setupdigits", g_setupDigitHotkeys ? L"1" : L"0",
-                               g_configPath.c_str());
-    WritePrivateProfileStringW(L"setups", L"active", g_activeSetup.c_str(), g_configPath.c_str());
-    WritePrivateProfileStringW(L"setups", L"editing", g_editingSetup.c_str(), g_configPath.c_str());
-
-    for (const auto& [deviceId, s] : g_settings) {
-        const wchar_t* section = deviceId.c_str();
-        WritePrivateProfileStringW(section, L"checked", s.checked ? L"1" : L"0", g_configPath.c_str());
-        WritePrivateProfileStringW(section, L"latency", std::to_wstring(s.latencyMs).c_str(), g_configPath.c_str());
-        WritePrivateProfileStringW(section, L"channel", std::to_wstring(s.channelMode).c_str(), g_configPath.c_str());
-        WritePrivateProfileStringW(section, L"volume", std::to_wstring(s.volumePercent).c_str(), g_configPath.c_str());
-        for (int b = 0; b < kEqBandCount; ++b) {
-            WritePrivateProfileStringW(section, (L"eq" + std::to_wstring(b)).c_str(),
-                                       std::to_wstring(s.eqDb[b]).c_str(), g_configPath.c_str());
-        }
-        WritePrivateProfileStringW(section, L"muted", s.muted ? L"1" : L"0", g_configPath.c_str());
-        WritePrivateProfileStringW(section, L"order", std::to_wstring(s.order).c_str(), g_configPath.c_str());
-        WritePrivateProfileStringW(section, L"name", s.name.c_str(), g_configPath.c_str());
-        WritePrivateProfileStringW(section, L"alias", s.alias.c_str(), g_configPath.c_str());
-        WritePrivateProfileStringW(section, L"color", s.colorHex.c_str(), g_configPath.c_str());
-    }
+    if (g_mainWnd) SetTimer(g_mainWnd, IDT_SAVE, kSaveDelayMs, nullptr);
+    else FlushConfig();
 }
-
-int ClampDb(int v) { return std::min(12, std::max(-12, v)); }
-int ClampChannelMode(int v) { return std::min(2, std::max(0, v)); }
-int ClampVolume(int v) { return std::min(100, std::max(0, v)); }
-int ClampLatencyMs(int v) { return std::min(500, std::max(0, v)); }
-int ClampCushionMs(int v) { return std::min(kMaxBaseCushionMs, std::max(kMinBaseCushionMs, v)); }
-int ClampDeviceFillMs(int v) { return std::min(kMaxDeviceFillMs, std::max(kMinDeviceFillMs, v)); }
-int ClampThemeOverride(int v) { return std::min(2, std::max(0, v)); }
 
 // The volume actually sent to the engine: the speaker's own slider scaled by
 // the group's master volume. g_settings keeps s.volumePercent as the
@@ -507,17 +436,6 @@ std::wstring FormatHotkey(UINT mods, UINT vk) {
         s += buf;
     }
     return s;
-}
-
-void LoadHotkeysFromIni() {
-    if (g_configPath.empty()) return;
-    g_toggleHotkeyMods = GetPrivateProfileIntW(L"hotkeys", L"togglemods", MOD_CONTROL | MOD_ALT,
-                                               g_configPath.c_str());
-    g_toggleHotkeyVk = GetPrivateProfileIntW(L"hotkeys", L"togglevk", 'G', g_configPath.c_str());
-    g_switcherHotkeyMods = GetPrivateProfileIntW(L"hotkeys", L"switchermods", MOD_CONTROL | MOD_ALT,
-                                                 g_configPath.c_str());
-    g_switcherHotkeyVk = GetPrivateProfileIntW(L"hotkeys", L"switchervk", 'S', g_configPath.c_str());
-    g_setupDigitHotkeys = GetPrivateProfileIntW(L"hotkeys", L"setupdigits", 1, g_configPath.c_str()) != 0;
 }
 
 // Ctrl+Maj+1..9 are only registered while they can do something (option on
@@ -547,157 +465,6 @@ bool RebindHotkey(HWND hwnd, int id, UINT& modsVar, UINT& vkVar, UINT newMods, U
     modsVar = newMods;
     vkVar = newVk;
     return true;
-}
-
-OutputSettings LoadDeviceSettings(const std::wstring& deviceId) {
-    OutputSettings s;
-    if (g_configPath.empty()) return s;
-    const wchar_t* section = deviceId.c_str();
-    s.checked = GetPrivateProfileIntW(section, L"checked", 0, g_configPath.c_str()) != 0;
-    s.latencyMs = GetPrivateProfileIntW(section, L"latency", 0, g_configPath.c_str());
-    s.channelMode = GetPrivateProfileIntW(section, L"channel", 0, g_configPath.c_str());
-    s.volumePercent = GetPrivateProfileIntW(section, L"volume", 100, g_configPath.c_str());
-    // Bands default from the old bass/treble keys (band 0 = low shelf, the
-    // last = high shelf) so existing configs migrate instead of resetting.
-    int legacyBass = static_cast<int>(GetPrivateProfileIntW(section, L"bass", 0, g_configPath.c_str()));
-    int legacyTreble = static_cast<int>(GetPrivateProfileIntW(section, L"treble", 0, g_configPath.c_str()));
-    for (int b = 0; b < kEqBandCount; ++b) {
-        int fallback = (b == 0) ? legacyBass : (b == kEqBandCount - 1) ? legacyTreble : 0;
-        s.eqDb[b] = ClampDb(static_cast<int>(
-            GetPrivateProfileIntW(section, (L"eq" + std::to_wstring(b)).c_str(), fallback, g_configPath.c_str())));
-    }
-    s.muted = GetPrivateProfileIntW(section, L"muted", 0, g_configPath.c_str()) != 0;
-    s.order = static_cast<int>(GetPrivateProfileIntW(section, L"order", 1000000, g_configPath.c_str()));
-    wchar_t nameBuf[256] = {};
-    GetPrivateProfileStringW(section, L"name", L"", nameBuf, 256, g_configPath.c_str());
-    s.name = nameBuf;
-    wchar_t aliasBuf[128] = {};
-    GetPrivateProfileStringW(section, L"alias", L"", aliasBuf, 128, g_configPath.c_str());
-    s.alias = aliasBuf;
-    wchar_t colorBuf[16] = {};
-    GetPrivateProfileStringW(section, L"color", L"", colorBuf, 16, g_configPath.c_str());
-    s.colorHex = colorBuf;
-    // Clamp (not reset-to-0) to match LoadSetupsFromIni and the live "channel"
-    // handler, which treat an out-of-range value as clamped rather than reset.
-    s.channelMode = ClampChannelMode(s.channelMode);
-    s.volumePercent = ClampVolume(s.volumePercent);
-    s.latencyMs = ClampLatencyMs(s.latencyMs);
-    return s;
-}
-
-// --- Setups (named presets), persisted as [setup_N] sections in the INI ---
-
-std::wstring SetupSection(size_t i) { return L"setup_" + std::to_wstring(i); }
-
-std::vector<std::wstring> SplitPipes(const std::wstring& s) {
-    std::vector<std::wstring> parts;
-    size_t start = 0;
-    while (true) {
-        size_t p = s.find(L'|', start);
-        parts.push_back(s.substr(start, p - start));
-        if (p == std::wstring::npos) break;
-        start = p + 1;
-    }
-    return parts;
-}
-
-void SaveSetupsToIni() {
-    if (g_configPath.empty()) return;
-    // Delete every previously written section first so shrinking the list
-    // doesn't leave orphaned [setup_N] sections behind.
-    int oldCount = GetPrivateProfileIntW(L"setups", L"count", 0, g_configPath.c_str());
-    for (int i = 0; i < oldCount; ++i) {
-        WritePrivateProfileStringW(SetupSection(i).c_str(), nullptr, nullptr, g_configPath.c_str());
-    }
-    WritePrivateProfileStringW(L"setups", L"count", std::to_wstring(g_setups.size()).c_str(),
-                               g_configPath.c_str());
-    WritePrivateProfileStringW(L"setups", L"active", g_activeSetup.c_str(), g_configPath.c_str());
-    WritePrivateProfileStringW(L"setups", L"editing", g_editingSetup.c_str(), g_configPath.c_str());
-    for (size_t i = 0; i < g_setups.size(); ++i) {
-        const auto& setup = g_setups[i];
-        std::wstring section = SetupSection(i);
-        WritePrivateProfileStringW(section.c_str(), L"name", setup.name.c_str(), g_configPath.c_str());
-        WritePrivateProfileStringW(section.c_str(), L"mic", setup.micId.c_str(), g_configPath.c_str());
-        WritePrivateProfileStringW(section.c_str(), L"micvol",
-                                   std::to_wstring(setup.micVolume).c_str(), g_configPath.c_str());
-        WritePrivateProfileStringW(section.c_str(), L"micmute", setup.micMute ? L"1" : L"0",
-                                   g_configPath.c_str());
-        WritePrivateProfileStringW(section.c_str(), L"devcount",
-                                   std::to_wstring(setup.devices.size()).c_str(), g_configPath.c_str());
-        for (size_t k = 0; k < setup.devices.size(); ++k) {
-            const auto& [id, s] = setup.devices[k];
-            // Endpoint ids never contain '|', so pipes are a safe separator.
-            // Fields 5/6 keep the pre-multiband "bass"/"treble" slots (band 0
-            // and the last band) so old parsers/saves stay compatible; the
-            // remaining middle bands are appended after the muted flag.
-            std::wstring v = id + L"|" + (s.checked ? L"1" : L"0") +
-                             L"|" + std::to_wstring(s.channelMode) +
-                             L"|" + std::to_wstring(s.volumePercent) +
-                             L"|" + std::to_wstring(s.latencyMs) +
-                             L"|" + std::to_wstring(s.eqDb[0]) +
-                             L"|" + std::to_wstring(s.eqDb[kEqBandCount - 1]) +
-                             L"|" + (s.muted ? L"1" : L"0");
-            for (int b = 1; b < kEqBandCount - 1; ++b) v += L"|" + std::to_wstring(s.eqDb[b]);
-            std::wstring key = L"dev" + std::to_wstring(k);
-            WritePrivateProfileStringW(section.c_str(), key.c_str(), v.c_str(), g_configPath.c_str());
-        }
-    }
-}
-
-void LoadSetupsFromIni() {
-    g_setups.clear();
-    if (g_configPath.empty()) return;
-    wchar_t buf[512] = {};
-    GetPrivateProfileStringW(L"setups", L"active", L"", buf, 512, g_configPath.c_str());
-    g_activeSetup = buf;
-    GetPrivateProfileStringW(L"setups", L"editing", L"", buf, 512, g_configPath.c_str());
-    g_editingSetup = buf;
-    int count = GetPrivateProfileIntW(L"setups", L"count", 0, g_configPath.c_str());
-    for (int i = 0; i < count; ++i) {
-        std::wstring section = SetupSection(i);
-        Setup setup;
-        GetPrivateProfileStringW(section.c_str(), L"name", L"", buf, 512, g_configPath.c_str());
-        setup.name = buf;
-        if (setup.name.empty()) continue;
-        GetPrivateProfileStringW(section.c_str(), L"mic", L"", buf, 512, g_configPath.c_str());
-        setup.micId = buf;
-        setup.micVolume = static_cast<int>(GetPrivateProfileIntW(
-            section.c_str(), L"micvol", static_cast<UINT>(-1), g_configPath.c_str()));
-        if (setup.micVolume >= 0) setup.micVolume = ClampVolume(setup.micVolume);
-        setup.micMute = GetPrivateProfileIntW(section.c_str(), L"micmute", 0, g_configPath.c_str()) != 0;
-        int devCount = GetPrivateProfileIntW(section.c_str(), L"devcount", 0, g_configPath.c_str());
-        for (int k = 0; k < devCount; ++k) {
-            std::wstring key = L"dev" + std::to_wstring(k);
-            GetPrivateProfileStringW(section.c_str(), key.c_str(), L"", buf, 512, g_configPath.c_str());
-            auto parts = SplitPipes(buf);
-            // 7 fields = setups saved before the muted flag existed.
-            if (parts.size() < 7 || parts[0].empty()) continue;
-            OutputSettings s;
-            s.checked = parts[1] == L"1";
-            s.channelMode = ClampChannelMode(_wtoi(parts[2].c_str()));
-            s.volumePercent = ClampVolume(_wtoi(parts[3].c_str()));
-            s.latencyMs = ClampLatencyMs(_wtoi(parts[4].c_str()));
-            s.eqDb[0] = ClampDb(_wtoi(parts[5].c_str()));
-            s.eqDb[kEqBandCount - 1] = ClampDb(_wtoi(parts[6].c_str()));
-            s.muted = parts.size() >= 8 && parts[7] == L"1";
-            // Middle bands are absent in setups saved before the 5-band EQ
-            // (or in the 2-band bass/treble era) -- default them to 0dB.
-            for (int b = 1; b < kEqBandCount - 1; ++b) {
-                size_t idx = 7 + static_cast<size_t>(b);
-                s.eqDb[b] = (parts.size() > idx) ? ClampDb(_wtoi(parts[idx].c_str())) : 0;
-            }
-            setup.devices.emplace_back(parts[0], s);
-        }
-        if (!setup.devices.empty()) g_setups.push_back(std::move(setup));
-    }
-    // A dangling name (setup deleted in a previous run) must not stick around.
-    bool activeExists = false, editingExists = false;
-    for (const auto& s : g_setups) {
-        if (s.name == g_activeSetup) activeExists = true;
-        if (s.name == g_editingSetup) editingExists = true;
-    }
-    if (!activeExists) g_activeSetup.clear();
-    if (!editingExists) g_editingSetup.clear();
 }
 
 // --- Launch at Windows startup (HKCU Run key) ---
@@ -785,9 +552,7 @@ std::wstring GetDefaultRenderId() {
 // virtual cable as the default with no record of what to put back (see
 // RepairAfterCrash).
 void PersistPreviousDefault() {
-    if (g_configPath.empty()) return;
-    WritePrivateProfileStringW(L"group", L"previousdefault", g_previousDefaultId.c_str(),
-                               g_configPath.c_str());
+    FlushConfig();
 }
 
 // Puts Windows' default output back on preferredId -- or, if that device
@@ -998,8 +763,9 @@ void SaveRoutedAppsToIni();
 void UnrouteAllApps() {
     for (DWORD pid : g_routedPids) SetAppRenderEndpoint(pid, L"");
     g_routedPids.clear();
-    if (!g_configPath.empty()) {
-        WritePrivateProfileStringW(L"routing", L"apps", L"", g_configPath.c_str());
+    if (!g_cfg.routedApps.empty()) {
+        g_cfg.routedApps.clear();
+        FlushConfig();
     }
 }
 
@@ -1068,16 +834,13 @@ std::vector<SourceApp> EnumerateSourceApps() {
 // Remembers which executables are currently routed into the cable, so a
 // crash (no clean stop path) can be repaired at the next launch.
 void SaveRoutedAppsToIni() {
-    if (g_configPath.empty()) return;
     auto procs = SnapshotProcesses();
-    std::wstring list;
+    g_cfg.routedApps.clear();
     for (DWORD pid : g_routedPids) {
         auto it = procs.find(pid);
-        if (it == procs.end()) continue;
-        if (!list.empty()) list += L';';
-        list += it->second.exe;
+        if (it != procs.end()) g_cfg.routedApps.push_back(it->second.exe);
     }
-    WritePrivateProfileStringW(L"routing", L"apps", list.c_str(), g_configPath.c_str());
+    FlushConfig(); // crash repair relies on this being on disk right away
 }
 
 // Startup repair after a previous run died mid-group (crash, taskkill):
@@ -1088,10 +851,8 @@ void SaveRoutedAppsToIni() {
 //   stale route until it can be resolved to a PID again -- unavoidable with
 //   this API.)
 void RepairAfterCrash() {
-    if (g_configPath.empty()) return;
-    wchar_t prevBuf[512] = {};
-    GetPrivateProfileStringW(L"group", L"previousdefault", L"", prevBuf, 512, g_configPath.c_str());
-    if (prevBuf[0]) {
+    bool dirty = false;
+    if (!g_cfg.previousDefault.empty()) {
         std::wstring current = GetDefaultRenderId();
         bool onCable = false;
         for (const auto& d : g_deviceManager->enumerateRenderDevices()) {
@@ -1099,23 +860,16 @@ void RepairAfterCrash() {
         }
         if (onCable) {
             LOG_WARN(L"Arrêt brutal détecté lors de la session précédente : restauration de la sortie par défaut.");
-            RestoreDefaultRender(prevBuf);
+            RestoreDefaultRender(g_cfg.previousDefault);
         }
-        WritePrivateProfileStringW(L"group", L"previousdefault", L"", g_configPath.c_str());
+        g_cfg.previousDefault.clear();
+        dirty = true;
     }
 
-    wchar_t buf[1024] = {};
-    GetPrivateProfileStringW(L"routing", L"apps", L"", buf, 1024, g_configPath.c_str());
-    std::wstring list = buf;
-    if (list.empty()) return;
-    auto procs = SnapshotProcesses();
-    std::vector<DWORD> roots;
-    size_t start = 0;
-    while (start <= list.size()) {
-        size_t sep = list.find(L';', start);
-        std::wstring exe = list.substr(start, sep == std::wstring::npos ? std::wstring::npos
-                                                                        : sep - start);
-        if (!exe.empty()) {
+    if (!g_cfg.routedApps.empty()) {
+        auto procs = SnapshotProcesses();
+        std::vector<DWORD> roots;
+        for (const auto& exe : g_cfg.routedApps) {
             for (const auto& [pid, info] : procs) {
                 if (_wcsicmp(info.exe.c_str(), exe.c_str()) != 0) continue;
                 DWORD root = RootProcessSameExe(pid, procs);
@@ -1124,11 +878,11 @@ void RepairAfterCrash() {
                 }
             }
         }
-        if (sep == std::wstring::npos) break;
-        start = sep + 1;
+        for (DWORD root : roots) SetAppRenderEndpoint(root, L"");
+        g_cfg.routedApps.clear();
+        dirty = true;
     }
-    for (DWORD root : roots) SetAppRenderEndpoint(root, L"");
-    WritePrivateProfileStringW(L"routing", L"apps", L"", g_configPath.c_str());
+    if (dirty) FlushConfig();
 }
 
 // --- Device list ---
@@ -1146,34 +900,24 @@ void SortOutputDevicesByOrder() {
 // moving a USB DAC to another port hands it a brand-new id, and all its
 // settings (latency, EQ, alias, color, setup membership) would silently
 // start over. When an unknown id shows up, look through the config for a
-// section whose last-seen name matches and whose own id is no longer
+// device whose last-seen name matches and whose own id is no longer
 // enumerated: same device, new id -- carry everything over.
-std::wstring FindOrphanSectionByName(const std::wstring& name, const std::set<std::wstring>& presentIds) {
-    if (g_configPath.empty() || name.empty()) return L"";
-    std::vector<wchar_t> names(32768);
-    DWORD len = GetPrivateProfileSectionNamesW(names.data(), static_cast<DWORD>(names.size()),
-                                               g_configPath.c_str());
-    if (len == 0) return L"";
-    for (const wchar_t* p = names.data(); *p; p += wcslen(p) + 1) {
-        std::wstring section = p;
-        if (section.rfind(L"{0.0.0.", 0) != 0) continue; // only endpoint sections
-        if (presentIds.count(section)) continue;
-        wchar_t nameBuf[256] = {};
-        GetPrivateProfileStringW(section.c_str(), L"name", L"", nameBuf, 256, g_configPath.c_str());
-        if (name == nameBuf) return section;
+std::wstring FindOrphanByName(const std::wstring& name, const std::set<std::wstring>& presentIds) {
+    if (name.empty()) return L"";
+    for (const auto& [id, s] : g_settings) {
+        if (!presentIds.count(id) && s.name == name) return id;
     }
     return L"";
 }
 
 void MigrateDeviceId(const std::wstring& oldId, const std::wstring& newId) {
-    g_settings[newId] = LoadDeviceSettings(oldId);
+    g_settings[newId] = g_settings[oldId];
     g_settings.erase(oldId);
     for (auto& setup : g_setups) {
         for (auto& [id, s] : setup.devices) {
             if (id == oldId) id = newId;
         }
     }
-    WritePrivateProfileStringW(oldId.c_str(), nullptr, nullptr, g_configPath.c_str()); // drop the section
     LOG_INFO(L"Périphérique reconnu sous un nouvel identifiant, réglages transférés : " + newId);
 }
 
@@ -1182,165 +926,133 @@ void PopulateOutputList() {
     auto devices = g_deviceManager->enumerateRenderDevices();
     std::set<std::wstring> presentIds;
     for (const auto& d : devices) presentIds.insert(d.id);
-    bool migrated = false;
+    const long long now = static_cast<long long>(std::time(nullptr));
+    bool dirty = false;
     for (auto& d : devices) {
         if (IsVirtualDevice(d.name)) continue;
         if (g_settings.find(d.id) == g_settings.end()) {
-            OutputSettings s = LoadDeviceSettings(d.id);
-            bool knownSection = !s.name.empty();
-            if (!knownSection) {
-                std::wstring orphan = FindOrphanSectionByName(d.name, presentIds);
-                if (!orphan.empty()) {
-                    MigrateDeviceId(orphan, d.id);
-                    migrated = true;
-                    s = g_settings[d.id];
-                }
-            }
-            g_settings[d.id] = s;
+            std::wstring orphan = FindOrphanByName(d.name, presentIds);
+            if (!orphan.empty()) MigrateDeviceId(orphan, d.id);
+            else g_settings[d.id] = OutputSettings{};
+            dirty = true;
         }
-        g_settings[d.id].name = d.name;
+        OutputSettings& s = g_settings[d.id];
+        if (s.name != d.name) { s.name = d.name; dirty = true; }
+        s.lastSeen = now;
         g_outputDevices.push_back(d);
     }
-    if (migrated) {
-        SaveConfig();
-        SaveSetupsToIni();
-    }
+    if (dirty) SaveConfig();
     SortOutputDevicesByOrder();
 }
 
 // --- JSON bridge to the web UI ---
+// Outgoing messages are built as nlohmann::json and serialized once --
+// escaping, number formatting (locale-independent) and nesting are no
+// longer hand-rolled. Incoming commands stay the compact "cmd|arg|arg"
+// strings (see HandleWebMessage): endpoint ids never contain '|' and any
+// free-text argument is always last, so no escaping is ever needed there.
 
-std::wstring JsonEscape(const std::wstring& s) {
-    std::wstring out;
-    out.reserve(s.size() + 8);
-    for (wchar_t c : s) {
-        switch (c) {
-            case L'"': out += L"\\\""; break;
-            case L'\\': out += L"\\\\"; break;
-            case L'\n': out += L"\\n"; break;
-            case L'\r': out += L"\\r"; break;
-            case L'\t': out += L"\\t"; break;
-            default:
-                if (c < 0x20) {
-                    wchar_t buf[8];
-                    swprintf(buf, 8, L"\\u%04x", static_cast<unsigned>(c));
-                    out += buf;
-                } else {
-                    out += c;
-                }
-        }
-    }
-    return out;
-}
+std::string U8(const std::wstring& w) { return ToUtf8(w); }
 
-void PostJson(const std::wstring& json) {
+void PostJsonText(const std::wstring& text) {
     // Never poke the main WebView while its window is hidden: it may be
     // suspended (see SuspendMainWebView) and a message would wake the whole
     // page just to update something nobody can see. RestoreFromTray re-sends
     // the full state on the way back.
     if (g_webview && g_mainWnd && IsWindowVisible(g_mainWnd)) {
-        g_webview->PostWebMessageAsJson(json.c_str());
+        g_webview->PostWebMessageAsJson(text.c_str());
     }
-    if (g_optionsWebview) g_optionsWebview->PostWebMessageAsJson(json.c_str());
+    if (g_optionsWebview) g_optionsWebview->PostWebMessageAsJson(text.c_str());
 }
 
-std::wstring BoolJson(bool b) { return b ? L"true" : L"false"; }
+void PostJson(const json& j) { PostJsonText(FromUtf8(j.dump())); }
 
-const wchar_t* DeviceKindJson(AudioDeviceKind kind) {
+const char* DeviceKindJson(AudioDeviceKind kind) {
     switch (kind) {
-        case AudioDeviceKind::Headphones: return L"headphones";
-        case AudioDeviceKind::Hdmi:        return L"hdmi";
-        case AudioDeviceKind::Digital:     return L"digital";
-        case AudioDeviceKind::Bluetooth:   return L"bluetooth";
-        default:                           return L"speaker";
+        case AudioDeviceKind::Headphones: return "headphones";
+        case AudioDeviceKind::Hdmi:        return "hdmi";
+        case AudioDeviceKind::Digital:     return "digital";
+        case AudioDeviceKind::Bluetooth:   return "bluetooth";
+        default:                           return "speaker";
     }
 }
 
 void SendState() {
     COLORREF accent = GetWindowsAccentColor();
-    wchar_t accentHex[8];
-    swprintf(accentHex, 8, L"#%02x%02x%02x", GetRValue(accent), GetGValue(accent), GetBValue(accent));
-    std::wstring j = L"{\"type\":\"state\",\"running\":" + BoolJson(g_engine.isRunning()) +
-                     L",\"starting\":" + BoolJson(g_engine.isStarting()) +
-                     L",\"version\":\"" L"" AL_VERSION_STR L"\"" +
-                     L",\"accent\":\"" + accentHex +
-                     L"\",\"autostart\":" + BoolJson(g_autostart) +
-                     L",\"launchAtStartup\":" + BoolJson(IsLaunchAtStartupEnabled()) +
-                     L",\"masterVolume\":" + std::to_wstring(g_masterVolumePercent) +
-                     L",\"cushionMs\":" + std::to_wstring(g_baseCushionMs) +
-                     L",\"cushionMsMin\":" + std::to_wstring(kMinBaseCushionMs) +
-                     L",\"cushionMsMax\":" + std::to_wstring(kMaxBaseCushionMs) +
-                     L",\"deviceFillMs\":" + std::to_wstring(g_deviceFillMs) +
-                     L",\"deviceFillMsMin\":" + std::to_wstring(kMinDeviceFillMs) +
-                     L",\"deviceFillMsMax\":" + std::to_wstring(kMaxDeviceFillMs) +
-                     L",\"lowLatency\":" + BoolJson(g_lowLatency) +
-                     L",\"setupDigitHotkeys\":" + BoolJson(g_setupDigitHotkeys) +
-                     L",\"optimizing\":" + BoolJson(g_optimizing) +
-                     L",\"theme\":" + std::to_wstring(g_themeOverride) +
-                     L",\"toggleHotkey\":\"" + JsonEscape(FormatHotkey(g_toggleHotkeyMods, g_toggleHotkeyVk)) +
-                     L"\",\"switcherHotkey\":\"" + JsonEscape(FormatHotkey(g_switcherHotkeyMods, g_switcherHotkeyVk)) +
-                     L"\",\"capturingHotkey\":\"" +
-                     (g_hotkeyCaptureId == HOTKEY_TOGGLE_GROUP ? L"toggle" :
-                      g_hotkeyCaptureId == HOTKEY_SETUP_SWITCHER ? L"switcher" : L"") +
-                     L"\",\"devices\":[";
-    for (size_t i = 0; i < g_outputDevices.size(); ++i) {
-        const auto& d = g_outputDevices[i];
+    char accentHex[8];
+    snprintf(accentHex, sizeof(accentHex), "#%02x%02x%02x", GetRValue(accent), GetGValue(accent), GetBValue(accent));
+
+    json j;
+    j["type"] = "state";
+    j["running"] = g_engine.isRunning();
+    j["starting"] = g_engine.isStarting();
+    j["version"] = AL_VERSION_STR;
+    j["accent"] = accentHex;
+    j["autostart"] = g_autostart;
+    j["launchAtStartup"] = IsLaunchAtStartupEnabled();
+    j["masterVolume"] = g_masterVolumePercent;
+    j["cushionMs"] = g_baseCushionMs;
+    j["cushionMsMin"] = kMinBaseCushionMs;
+    j["cushionMsMax"] = kMaxBaseCushionMs;
+    j["deviceFillMs"] = g_deviceFillMs;
+    j["deviceFillMsMin"] = kMinDeviceFillMs;
+    j["deviceFillMsMax"] = kMaxDeviceFillMs;
+    j["lowLatency"] = g_lowLatency;
+    j["setupDigitHotkeys"] = g_setupDigitHotkeys;
+    j["optimizing"] = g_optimizing;
+    j["theme"] = g_themeOverride;
+    j["toggleHotkey"] = U8(FormatHotkey(g_toggleHotkeyMods, g_toggleHotkeyVk));
+    j["switcherHotkey"] = U8(FormatHotkey(g_switcherHotkeyMods, g_switcherHotkeyVk));
+    j["capturingHotkey"] = g_hotkeyCaptureId == HOTKEY_TOGGLE_GROUP ? "toggle"
+                         : g_hotkeyCaptureId == HOTKEY_SETUP_SWITCHER ? "switcher" : "";
+
+    j["devices"] = json::array();
+    for (const auto& d : g_outputDevices) {
         const auto& s = g_settings[d.id];
-        if (i) j += L',';
-        j += L"{\"id\":\"" + JsonEscape(d.id) +
-             L"\",\"name\":\"" + JsonEscape(d.name) +
-             L"\",\"kind\":\"" + DeviceKindJson(d.kind) +
-             L"\",\"alias\":\"" + JsonEscape(s.alias) +
-             L"\",\"color\":\"" + JsonEscape(s.colorHex) +
-             L"\",\"checked\":" + BoolJson(s.checked) +
-             L",\"channel\":" + std::to_wstring(s.channelMode) +
-             L",\"volume\":" + std::to_wstring(s.volumePercent) +
-             L",\"latency\":" + std::to_wstring(s.latencyMs) +
-             L",\"eq\":[";
-        for (int b = 0; b < kEqBandCount; ++b) {
-            if (b) j += L',';
-            j += std::to_wstring(s.eqDb[b]);
-        }
-        j += L"]";
-        j += L",\"muted\":" + BoolJson(s.muted) +
-             L",\"sourcePid\":" + std::to_wstring(s.sourcePid) + L"}";
+        json jd;
+        jd["id"] = U8(d.id);
+        jd["name"] = U8(d.name);
+        jd["kind"] = DeviceKindJson(d.kind);
+        jd["alias"] = U8(s.alias);
+        jd["color"] = U8(s.colorHex);
+        jd["checked"] = s.checked;
+        jd["channel"] = s.channelMode;
+        jd["volume"] = s.volumePercent;
+        jd["latency"] = s.latencyMs;
+        jd["eq"] = s.eqDb;
+        jd["muted"] = s.muted;
+        jd["sourcePid"] = s.sourcePid;
+        j["devices"].push_back(std::move(jd));
     }
-    j += L"],\"setups\":[";
-    for (size_t i = 0; i < g_setups.size(); ++i) {
-        const auto& s = g_setups[i];
+
+    j["setups"] = json::array();
+    for (const auto& s : g_setups) {
         size_t checkedCount = 0;
         for (const auto& [id, os] : s.devices) {
             if (os.checked) ++checkedCount;
         }
-        if (i) j += L',';
-        j += L"{\"name\":\"" + JsonEscape(s.name) +
-             L"\",\"count\":" + std::to_wstring(checkedCount) + L"}";
+        j["setups"].push_back({ { "name", U8(s.name) }, { "count", checkedCount } });
     }
-    j += L"],\"activeSetup\":\"" + JsonEscape(g_activeSetup) +
-         L"\",\"editingSetup\":\"" + JsonEscape(g_editingSetup) +
-         L"\",\"playingSetup\":\"" + JsonEscape(g_playingSetup) +
-         L"\",\"setupMic\":\"" + JsonEscape(g_setupMicId) + L"\"";
+    j["activeSetup"] = U8(g_activeSetup);
+    j["editingSetup"] = U8(g_editingSetup);
+    j["playingSetup"] = U8(g_playingSetup);
+    j["setupMic"] = U8(g_setupMicId);
+
     // Physical capture devices, for the INPUTS tab and the mic-calibration
     // modal's input picker (virtual endpoints filtered out: a cable "mic"
     // can't hear a speaker, and shouldn't become anyone's default mic).
     // Their Windows level/mute is only read while the INPUTS tab is showing
     // (g_micMetering): one COM activation per mic on every state resend is
     // not worth it for a tab nobody is looking at.
-    j += L",\"inputs\":[";
-    size_t inputCount = 0;
+    j["inputs"] = json::array();
     for (const auto& d : g_deviceManager->enumerateCaptureDevices()) {
         if (IsVirtualDevice(d.name)) continue;
-        if (inputCount++) j += L',';
         int micVol = 100;
         bool micMuted = false;
         if (g_micMetering) GetCaptureVolume(d.id, micVol, micMuted);
-        j += L"{\"id\":\"" + JsonEscape(d.id) +
-             L"\",\"name\":\"" + JsonEscape(d.name) +
-             L"\",\"default\":" + BoolJson(d.isDefault) +
-             L",\"volume\":" + std::to_wstring(micVol) +
-             L",\"muted\":" + BoolJson(micMuted) + L"}";
+        j["inputs"].push_back({ { "id", U8(d.id) }, { "name", U8(d.name) }, { "default", d.isDefault },
+                                { "volume", micVol }, { "muted", micMuted } });
     }
-    j += L"]}";
     PostJson(j);
 }
 
@@ -1349,16 +1061,18 @@ void SendState() {
 // every device plus a process snapshot is too heavy to pay on every
 // checkbox click, so the page asks for it when it needs it ("sources").
 void SendSources() {
-    std::wstring j = L"{\"type\":\"sources\",\"sources\":[";
-    auto sources = EnumerateSourceApps();
-    for (size_t i = 0; i < sources.size(); ++i) {
-        if (i) j += L',';
-        j += L"{\"pid\":" + std::to_wstring(sources[i].pid) +
-             L",\"name\":\"" + JsonEscape(sources[i].name) + L"\"}";
+    json j;
+    j["type"] = "sources";
+    j["sources"] = json::array();
+    for (const auto& s : EnumerateSourceApps()) {
+        j["sources"].push_back({ { "pid", s.pid }, { "name", U8(s.name) } });
     }
-    j += L"]}";
     PostJson(j);
 }
+
+// Meters are sent rounded to 3 decimals: enough for a VU, a third of the
+// bytes of a full double.
+double Milli(double v) { return std::round(v * 1000.0) / 1000.0; }
 
 void SendStatus() {
     auto status = g_engine.getStatus();
@@ -1388,43 +1102,37 @@ void SendStatus() {
         g_routedPids.erase(it);
         SaveRoutedAppsToIni();
     }
-    std::wstring j = L"{\"type\":\"status\",\"running\":" + BoolJson(g_engine.isRunning()) +
-                     L",\"starting\":" + BoolJson(g_engine.isStarting()) + L",\"outputs\":[";
-    for (size_t i = 0; i < status.size(); ++i) {
-        const auto& st = status[i];
-        if (i) j += L',';
+
+    json j;
+    j["type"] = "status";
+    j["running"] = g_engine.isRunning();
+    j["starting"] = g_engine.isStarting();
+    j["outputs"] = json::array();
+    for (const auto& st : status) {
         const OutputPeaks* pk = nullptr;
         for (const auto& p : peaks) {
             if (p.deviceId == st.deviceId) { pk = &p; break; }
         }
-        wchar_t peakBuf[16];
-        swprintf(peakBuf, 16, L"%.3f", pk ? pk->peak : 0.0);
-        j += L"{\"id\":\"" + JsonEscape(st.deviceId) +
-             L"\",\"active\":" + BoolJson(st.active) +
-             L",\"sourceLost\":" + BoolJson(st.sourceLost) +
-             L",\"peak\":" + peakBuf +
-             L",\"underruns\":" + std::to_wstring(st.underruns) +
-             L",\"drift\":" + std::to_wstring(st.driftCorrections) +
-             L",\"bands\":[";
+        json jo;
+        jo["id"] = U8(st.deviceId);
+        jo["active"] = st.active;
+        jo["sourceLost"] = st.sourceLost;
+        jo["peak"] = Milli(pk ? pk->peak : 0.0);
+        jo["underruns"] = st.underruns;
+        jo["drift"] = st.driftCorrections;
+        jo["lagMs"] = st.deviceLagMs;
+        jo["bands"] = json::array();
         for (int b = 0; b < kSpectrumBandCount; ++b) {
-            if (b) j += L',';
-            wchar_t bandBuf[16];
-            swprintf(bandBuf, 16, L"%.3f", pk ? pk->spectrumBands[b] : 0.0);
-            j += bandBuf;
+            jo["bands"].push_back(Milli(pk ? pk->spectrumBands[b] : 0.0));
         }
-        j += L"]}";
+        j["outputs"].push_back(std::move(jo));
     }
     // Per-mic peaks for the INPUTS tab's VU meters -- empty unless metering
     // is on (tab visible).
-    j += L"],\"micPeaks\":[";
-    auto micPeaks = g_engine.getMicPeaks();
-    for (size_t i = 0; i < micPeaks.size(); ++i) {
-        if (i) j += L',';
-        wchar_t peakBuf[16];
-        swprintf(peakBuf, 16, L"%.3f", micPeaks[i].second);
-        j += L"{\"id\":\"" + JsonEscape(micPeaks[i].first) + L"\",\"peak\":" + peakBuf + L"}";
+    j["micPeaks"] = json::array();
+    for (const auto& [id, peak] : g_engine.getMicPeaks()) {
+        j["micPeaks"].push_back({ { "id", U8(id) }, { "peak", Milli(peak) } });
     }
-    j += L"]}";
     PostJson(j);
 }
 
@@ -1432,41 +1140,40 @@ void SendStatus() {
 // modal's per-output rows render straight from this.
 void SendCalStatus() {
     auto snap = g_calibrator.snapshot();
-    std::wstring j = L"{\"type\":\"cal\",\"running\":" + BoolJson(snap.running) +
-                     L",\"cancelled\":" + BoolJson(snap.cancelled) +
-                     L",\"error\":\"" + JsonEscape(snap.error) + L"\",\"outputs\":[";
-    for (size_t i = 0; i < snap.outcomes.size(); ++i) {
-        const auto& o = snap.outcomes[i];
-        const wchar_t* st = o.state == CalState::Pending   ? L"pending"
-                          : o.state == CalState::Measuring ? L"measuring"
-                          : o.state == CalState::Done      ? L"done"
-                                                           : L"failed";
-        if (i) j += L',';
-        j += L"{\"id\":\"" + JsonEscape(o.deviceId) + L"\",\"state\":\"" + st +
-             L"\",\"delay\":" + std::to_wstring(o.delayMs) + L"}";
+    json j;
+    j["type"] = "cal";
+    j["running"] = snap.running;
+    j["cancelled"] = snap.cancelled;
+    j["error"] = U8(snap.error);
+    j["outputs"] = json::array();
+    for (const auto& o : snap.outcomes) {
+        const char* st = o.state == CalState::Pending   ? "pending"
+                       : o.state == CalState::Measuring ? "measuring"
+                       : o.state == CalState::Done      ? "done"
+                                                        : "failed";
+        j["outputs"].push_back({ { "id", U8(o.deviceId) }, { "state", st }, { "delay", o.delayMs } });
     }
-    j += L"]}";
     PostJson(j);
 }
 
 // Toasts posted while the main window is hidden never reach the (suspended)
 // page: keep them for the next RestoreFromTray, and surface errors through
 // a tray balloon right away so a failed autostart at logon isn't just lost.
-void RememberHiddenToast(const std::wstring& json, const std::wstring& balloonText) {
+void RememberHiddenToast(const json& j, const std::wstring& balloonText) {
     if (!g_mainWnd || IsWindowVisible(g_mainWnd)) return;
     if (g_pendingJson.size() >= 10) g_pendingJson.erase(g_pendingJson.begin());
-    g_pendingJson.push_back(json);
+    g_pendingJson.push_back(FromUtf8(j.dump()));
     if (!balloonText.empty()) ShowTrayBalloon(balloonText, NIIF_WARNING);
 }
 
 void SendError(const std::wstring& message) {
-    std::wstring j = L"{\"type\":\"error\",\"message\":\"" + JsonEscape(message) + L"\"}";
+    json j = { { "type", "error" }, { "message", U8(message) } };
     PostJson(j);
     RememberHiddenToast(j, message);
 }
 
 void SendInfo(const std::wstring& message) {
-    std::wstring j = L"{\"type\":\"info\",\"message\":\"" + JsonEscape(message) + L"\"}";
+    json j = { { "type", "info" }, { "message", U8(message) } };
     PostJson(j);
     RememberHiddenToast(j, L"");
 }
@@ -1474,9 +1181,8 @@ void SendInfo(const std::wstring& message) {
 // An error toast carrying one action button, which posts `command` back.
 void SendErrorWithAction(const std::wstring& message, const std::wstring& command,
                          const std::wstring& label) {
-    std::wstring j = L"{\"type\":\"error\",\"message\":\"" + JsonEscape(message) +
-                     L"\",\"action\":\"" + JsonEscape(command) +
-                     L"\",\"actionLabel\":\"" + JsonEscape(label) + L"\"}";
+    json j = { { "type", "error" }, { "message", U8(message) },
+               { "action", U8(command) }, { "actionLabel", U8(label) } };
     PostJson(j);
     RememberHiddenToast(j, message);
 }
@@ -2155,7 +1861,7 @@ void SaveSetupFromCurrent(std::wstring name) {
     if (!replaced) g_setups.push_back(std::move(setup));
     g_activeSetup = name;
     g_editingSetup = name;
-    SaveSetupsToIni();
+    SaveConfig();
     UpdateSetupDigitHotkeys(g_mainWnd);
     SendState();
 }
@@ -2245,7 +1951,7 @@ void DeleteSetup(const std::wstring& name) {
     if (g_activeSetup == name) g_activeSetup.clear();
     if (g_editingSetup == name) g_editingSetup.clear();
     if (g_playingSetup == name) g_playingSetup.clear();
-    SaveSetupsToIni();
+    SaveConfig();
     UpdateSetupDigitHotkeys(g_mainWnd);
     SendState();
 }
@@ -2253,24 +1959,17 @@ void DeleteSetup(const std::wstring& name) {
 // --- Options: export/import the whole config file ---
 
 void ExportConfig(HWND hwnd) {
-    // Everything lives in g_configPath already (SaveConfig/SaveSetupsToIni/
-    // SaveRoutedAppsToIni write straight to it as things change) -- flush
-    // once more just before copying so the export reflects this exact moment.
-    SaveConfig();
-    SaveSetupsToIni();
-    SaveRoutedAppsToIni();
-
-    wchar_t path[MAX_PATH] = L"AudioLinker.ini";
+    wchar_t path[MAX_PATH] = L"AudioLinker.json";
     OPENFILENAMEW ofn = { sizeof(ofn) };
     ofn.hwndOwner = hwnd;
-    ofn.lpstrFilter = L"Fichier de configuration (*.ini)\0*.ini\0Tous les fichiers (*.*)\0*.*\0";
+    ofn.lpstrFilter = L"Configuration AudioLinker (*.json)\0*.json\0Tous les fichiers (*.*)\0*.*\0";
     ofn.lpstrFile = path;
     ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrDefExt = L"ini";
+    ofn.lpstrDefExt = L"json";
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
     if (!GetSaveFileNameW(&ofn)) return; // cancelled
 
-    if (CopyFileW(g_configPath.c_str(), path, FALSE)) {
+    if (g_store.exportTo(path, g_cfg)) {
         SendInfo(L"Configuration exportée.");
     } else {
         SendError(L"Échec de l'export (erreur " + std::to_wstring(GetLastError()) + L").");
@@ -2281,7 +1980,7 @@ void ImportConfig(HWND hwnd) {
     wchar_t path[MAX_PATH] = L"";
     OPENFILENAMEW ofn = { sizeof(ofn) };
     ofn.hwndOwner = hwnd;
-    ofn.lpstrFilter = L"Fichier de configuration (*.ini)\0*.ini\0Tous les fichiers (*.*)\0*.*\0";
+    ofn.lpstrFilter = L"Configuration AudioLinker (*.json;*.ini)\0*.json;*.ini\0Tous les fichiers (*.*)\0*.*\0";
     ofn.lpstrFile = path;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
@@ -2299,7 +1998,18 @@ void ImportConfig(HWND hwnd) {
         return;
     }
 
-    if (!CopyFileW(path, g_configPath.c_str(), FALSE)) {
+    // Parsed first (a .json export, or a legacy .ini) so a broken file is
+    // refused here instead of wiping the current config.
+    AppConfig imported;
+    if (!g_store.importFrom(path, imported)) {
+        SendError(L"Ce fichier n'est pas une configuration AudioLinker valide.");
+        return;
+    }
+    // A running group's displaced default / routed apps belong to THIS
+    // session, which is about to shut down cleanly and restore them.
+    imported.previousDefault.clear();
+    imported.routedApps.clear();
+    if (!g_store.exportTo(g_store.path(), imported)) {
         SendError(L"Échec de l'import (erreur " + std::to_wstring(GetLastError()) + L").");
         return;
     }
@@ -3127,28 +2837,23 @@ void ShowTrayMenu(HWND hwnd) {
 
 // --- Window placement (persisted as [window] x/y/w/h, the normal rect) ---
 
+// Captures the window's normal rect into the config (written with the next
+// save -- the callers that hide or destroy the window flush right after).
 void SaveWindowPlacement(HWND hwnd) {
-    if (g_configPath.empty()) return;
     WINDOWPLACEMENT wp = { sizeof(wp) };
     if (!GetWindowPlacement(hwnd, &wp)) return;
     const RECT& r = wp.rcNormalPosition;
     if (r.right <= r.left || r.bottom <= r.top) return;
-    WritePrivateProfileStringW(L"window", L"x", std::to_wstring(r.left).c_str(), g_configPath.c_str());
-    WritePrivateProfileStringW(L"window", L"y", std::to_wstring(r.top).c_str(), g_configPath.c_str());
-    WritePrivateProfileStringW(L"window", L"w", std::to_wstring(r.right - r.left).c_str(), g_configPath.c_str());
-    WritePrivateProfileStringW(L"window", L"h", std::to_wstring(r.bottom - r.top).c_str(), g_configPath.c_str());
+    g_cfg.window = { r.left, r.top, r.right - r.left, r.bottom - r.top };
+    SaveConfig();
 }
 
 // False if nothing usable was saved, or the saved rect no longer touches any
 // monitor (screen unplugged since) -- the caller then uses the defaults.
 bool LoadWindowPlacement(RECT& out) {
-    if (g_configPath.empty()) return false;
-    int w = static_cast<int>(GetPrivateProfileIntW(L"window", L"w", 0, g_configPath.c_str()));
-    int h = static_cast<int>(GetPrivateProfileIntW(L"window", L"h", 0, g_configPath.c_str()));
-    if (w < 200 || h < 150) return false;
-    int x = static_cast<int>(GetPrivateProfileIntW(L"window", L"x", 0, g_configPath.c_str()));
-    int y = static_cast<int>(GetPrivateProfileIntW(L"window", L"y", 0, g_configPath.c_str()));
-    out = { x, y, x + w, y + h };
+    const WindowPlacement& w = g_cfg.window;
+    if (!w.valid()) return false;
+    out = { w.x, w.y, w.x + w.w, w.y + w.h };
     return MonitorFromRect(&out, MONITOR_DEFAULTTONULL) != nullptr;
 }
 
@@ -3180,28 +2885,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
         case WM_CREATE: {
             g_mainWnd = hwnd;
-            InitConfigPath();
-            g_autostart = GetPrivateProfileIntW(L"group", L"autostart", 0, g_configPath.c_str()) != 0;
+            // g_cfg was loaded in RunApplication (before the window existed).
             g_autostartPending = g_autostart;
-            g_masterVolumePercent = ClampVolume(
-                static_cast<int>(GetPrivateProfileIntW(L"group", L"mastervolume", 100, g_configPath.c_str())));
-            {
-                wchar_t micBuf[512] = {};
-                GetPrivateProfileStringW(L"group", L"micid", L"", micBuf, 512, g_configPath.c_str());
-                g_setupMicId = micBuf;
-            }
-            g_baseCushionMs = ClampCushionMs(static_cast<int>(GetPrivateProfileIntW(
-                L"group", L"cushionms", kDefaultBaseCushionMs, g_configPath.c_str())));
             g_engine.setBaseCushionMs(g_baseCushionMs);
-            g_deviceFillMs = ClampDeviceFillMs(static_cast<int>(GetPrivateProfileIntW(
-                L"group", L"devicefillms", kDefaultDeviceFillMs, g_configPath.c_str())));
             g_engine.setDeviceFillMs(g_deviceFillMs);
-            g_lowLatency = GetPrivateProfileIntW(L"group", L"lowlatency", 0, g_configPath.c_str()) != 0;
             g_engine.setLowLatency(g_lowLatency);
-            g_themeOverride = ClampThemeOverride(
-                static_cast<int>(GetPrivateProfileIntW(L"group", L"theme", 0, g_configPath.c_str())));
-            LoadHotkeysFromIni();
-            LoadSetupsFromIni();
             RepairAfterCrash(); // default output + app routing left over by a crash
 
             PopulateOutputList();
@@ -3366,6 +3054,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 }
                 return 0;
             }
+            if (wParam == IDT_SAVE) {
+                FlushConfig(); // kills the timer itself
+                return 0;
+            }
             if (wParam == IDT_OPT_TIMER) {
                 if (g_optimizing) OptimizerTick(hwnd);
                 return 0;
@@ -3456,15 +3148,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     g_engine.stop();
                 }
                 RestoreDefaultAndUnroute();
+                FlushConfig();
             }
             return 0;
         case WM_DESTROY:
             // Skipped after a config import: the imported file must reach
             // the relaunched instance untouched (see ImportConfig).
-            if (!g_skipSaveOnExit) {
-                SaveConfig();
-                SaveWindowPlacement(hwnd);
-            }
+            KillTimer(hwnd, IDT_SAVE);
+            if (!g_skipSaveOnExit) SaveWindowPlacement(hwnd);
             g_calibrator.cancel(); // its destructor joins the worker
             StopHotkeyCapture();
             CloseSwitcherHook();
@@ -3490,6 +3181,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             Shell_NotifyIconW(NIM_DELETE, &g_trayIcon);
             g_engine.stop();
             RestoreDefaultAndUnroute();
+            if (!g_skipSaveOnExit) FlushConfig();
             if (g_webview) {
                 g_webview->remove_WebMessageReceived(g_webMessageToken);
                 g_webview.Reset();
@@ -3541,12 +3233,11 @@ int RunApplication(HINSTANCE hInstance, int nCmdShow, bool startHidden, bool wai
 
     g_deviceManager = std::make_unique<DeviceManager>();
 
-    // Pre-load just the theme override (WM_CREATE loads the rest of the ini
-    // once the window exists) so the very first class background brush,
-    // created below before the window does, already reflects it.
-    InitConfigPath();
-    g_themeOverride = ClampThemeOverride(
-        static_cast<int>(GetPrivateProfileIntW(L"group", L"theme", 0, g_configPath.c_str())));
+    // The whole config is loaded before any window exists: the class
+    // background brush below already needs the theme, and the window its
+    // saved placement. (First run after 1.1: the INI is migrated here.)
+    g_store.init();
+    g_store.load(g_cfg);
 
     g_windowBg = WindowBgForTheme(EffectiveLightTheme());
     g_hBrushWindowBg = CreateSolidBrush(g_windowBg);

@@ -34,6 +34,7 @@ add_executable(AudioLinker WIN32
     src/AudioEngine.cpp
     src/Calibrator.cpp
     src/WasapiStream.cpp
+    src/Config.cpp
     src/Log.cpp
     assets/AudioLinker.rc
     # CMake merges .manifest sources into the exe's embedded manifest via
