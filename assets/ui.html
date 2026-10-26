@@ -317,6 +317,7 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
 #setupList::-webkit-scrollbar { width: 8px; }
 #setupList::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 .setup {
+  position: relative; /* anchors the delete button, which must not take row width */
   display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px;
   border: 1px solid transparent; cursor: pointer; transition: background 0.12s, border-color 0.12s;
   margin-bottom: 2px; outline: none;
@@ -339,16 +340,23 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
 .setup.on .setup-ico { background: var(--card); color: var(--text); border-color: var(--border); }
 .setup-main { flex: 1; min-width: 0; }
 .setup-name { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.setup-sub { display: flex; gap: 6px; align-items: center; margin-top: 2px; font-size: 11px; color: var(--faint); }
+/* Count + badges: wrap as whole items onto a second line when the row is
+   narrow, never break "1 enceinte" or a badge in two, never overlap. */
+.setup-sub { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-top: 3px; font-size: 11px; color: var(--faint); }
+.setup-sub > * { white-space: nowrap; }
 .badge.playing { color: var(--green); border-color: rgba(61, 220, 132, 0.4); }
 .badge.modified { color: var(--warn); border-color: rgba(232, 163, 61, 0.4); }
 .badge.selected { color: var(--accent-2); border-color: rgba(var(--accent-rgb), 0.4); }
+/* "Save changes": icon only (tooltip says where it saves), so the row keeps
+   its room for the name. */
 .setup-save {
-  flex: none; padding: 4px 8px; font-size: 11.5px; color: var(--warn); border-color: rgba(232, 163, 61, 0.45);
+  flex: none; width: 30px; height: 30px; padding: 0; display: grid; place-items: center;
+  color: var(--warn); border-color: rgba(232, 163, 61, 0.55); border-radius: 50%;
 }
 .setup-del {
-  flex: none; border: 0; background: transparent; color: var(--faint); border-radius: 6px;
-  width: 24px; height: 24px; cursor: pointer; font-size: 13px; line-height: 1;
+  position: absolute; top: 2px; right: 2px; z-index: 1;
+  border: 0; background: transparent; color: var(--faint); border-radius: 5px;
+  width: 18px; height: 18px; cursor: pointer; font-size: 11px; line-height: 1;
   opacity: 0; transition: opacity 0.12s, color 0.12s, background 0.12s;
 }
 .setup:hover .setup-del, .setup:focus-within .setup-del { opacity: 1; }
@@ -537,6 +545,11 @@ let state = { running: false, starting: false, masterVolume: 100, groupMuted: fa
               inputs: [], setupMic: "", automation: {} };
 let selectedId = null;
 const rowRefs = new Map(); // deviceId -> {row, fill, glitch, lag, badges:{ch,vol,lat,src}}
+// The speaker sheet is ONE element that moves under the selected row. It
+// must be held by reference: while it sits inside #deviceList, rebuilding
+// the list detaches it from the document and a $("#sheet") lookup then
+// returns null (that bug froze every re-render after a speaker was opened).
+const sheetEl = document.getElementById("sheet");
 
 const CHANNEL_NAMES = ["Stéréo", "Gauche", "Droite"];
 const displayName = d => d.alias || d.name;
@@ -547,7 +560,7 @@ const plural = (n, word) => `${n} ${word}${n > 1 ? "s" : ""}`;
 
 const SVG_PLAY = '<svg width="16" height="16" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>';
 const SVG_STOP = '<svg width="16" height="16" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>';
-const SVG_SAVE = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px">' +
+const SVG_SAVE = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
   '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>';
 const SVG_BELL = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
   '<path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>';
@@ -657,7 +670,10 @@ function renderHeader() {
 
 function renderList() {
   const list = $("#deviceList");
-  list.textContent = ""; // detaches the sheet too; placeSheet() puts it back
+  // Park the sheet out of the list first: clearing the list would detach it.
+  sheetEl.hidden = true;
+  document.body.appendChild(sheetEl);
+  list.textContent = "";
   rowRefs.clear();
   if (!state.devices.length) {
     const e = document.createElement("div");
@@ -1087,7 +1103,7 @@ function drawEqFlow(levels) {
 // Moves the (single) sheet element right under the selected row, or parks
 // it hidden when nothing is selected. Called after any list rebuild.
 function placeSheet() {
-  const sheet = $("#sheet");
+  const sheet = sheetEl;
   const r = selectedId ? rowRefs.get(selectedId) : null;
   if (!r) {
     sheet.hidden = true;
@@ -1106,9 +1122,7 @@ function placeSheet() {
   sheet.hidden = false;
 }
 // Clicks inside the sheet must not reach the row (which would close it).
-document.addEventListener("DOMContentLoaded", () => {
-  $("#sheet").addEventListener("click", ev => ev.stopPropagation());
-});
+sheetEl.addEventListener("click", ev => ev.stopPropagation());
 
 // Sizes the curve and the spectrum canvas to the sheet's real width (the
 // SVG viewBox follows the pixel width so nothing is stretched) and to the
@@ -1363,7 +1377,7 @@ function renderSetups() {
       // The "save changes" button lives on the row it would overwrite.
       const save = document.createElement("button");
       save.className = "ghost-btn setup-save";
-      save.innerHTML = SVG_SAVE + "Enregistrer";
+      save.innerHTML = SVG_SAVE;
       save.title = `Enregistrer les modifications dans « ${s.name} »`;
       save.addEventListener("click", ev => { ev.stopPropagation(); post("setup_update"); });
       row.appendChild(save);
@@ -1450,17 +1464,15 @@ function renderBanner() {
   }
 }
 
+// Each block renders on its own: a fault in one (a speaker with odd data...)
+// must never leave the others stale -- a frozen setups list is exactly what
+// makes a click look like it did nothing.
 function renderAll() {
   if (selectedId && !device(selectedId)) selectedId = null;
-  renderHeader();
-  renderList();
-  renderInputs();
-  renderSheet();
-  renderSetups();
-  renderMasterVolume();
-  renderFooter();
-  renderBanner();
-  announceSpectrumTarget();
+  for (const fn of [renderHeader, renderList, renderInputs, renderSheet, renderSetups,
+                    renderMasterVolume, renderFooter, renderBanner, announceSpectrumTarget]) {
+    try { fn(); } catch (e) { console.error("render failed in " + fn.name + ":", e); }
+  }
 }
 
 // ---------- Per-speaker source (selected in the sheet) ----------

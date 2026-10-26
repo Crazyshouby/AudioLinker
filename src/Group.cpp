@@ -266,8 +266,10 @@ void OnStop(HWND hwnd) {
 }
 
 void ToggleGroup(HWND hwnd) {
-    if (g_engine.isRunning()) OnStop(hwnd);
-    else if (!g_engine.isStarting() && !g_engine.isStopping()) OnCreateGroup(hwnd);
+    // The hotkey during a start in flight cancels it (the button is
+    // disabled then, the hotkey is not): same "stop" gesture as when running.
+    if (g_engine.isRunning() || g_engine.isStarting()) OnStop(hwnd);
+    else if (!g_engine.isStopping()) OnCreateGroup(hwnd);
 }
 
 // Mic-based latency alignment (see Calibrator.h). The group must be silent
@@ -434,11 +436,12 @@ bool MergeSetupIntoLiveSettings(const std::wstring& name) {
 }
 
 void ApplySetup(HWND hwnd, const std::wstring& name, bool ensureRunning) {
-    if (g_engine.isStarting()) {
-        SendError(L"Patientez : le groupe est en cours de démarrage.");
-        return;
-    }
+    // A start still negotiating devices used to refuse the switch with a
+    // "Patientez" toast, so a second click was needed. It is aborted
+    // instead (stopAsync handles a start in flight) and the new setup
+    // starts right after, like any other switch.
     bool wasRunning = g_engine.isRunning();
+    bool wasStarting = g_engine.isStarting();
     auto before = wasRunning ? ActiveOutputSet() : std::set<std::pair<std::wstring, unsigned long>>{};
     if (!MergeSetupIntoLiveSettings(name)) return; // unknown setup: nothing touched
     if (wasRunning && ActiveOutputSet() == before) {
@@ -447,8 +450,9 @@ void ApplySetup(HWND hwnd, const std::wstring& name, bool ensureRunning) {
         g_playingSetup = name;
         wasRunning = false; // nothing left to restart below
         ensureRunning = false;
-    } else if (wasRunning) {
+    } else if (wasRunning || wasStarting) {
         OnStop(hwnd);
+        wasRunning = true; // restart on the new configuration below
     }
     if (!g_setupMicId.empty()) {
         SetDefaultEndpointAllRoles(g_setupMicId);
