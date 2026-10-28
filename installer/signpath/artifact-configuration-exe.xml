@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration "exe": signs AudioLinker.exe, the first of the
+  two signing requests of a release (see .github/workflows/build.yml).
+  Paste this file into the SignPath project (Artifact configurations > New,
+  slug "exe"). The CI sends the unsigned file inside a ZIP (what
+  actions/upload-artifact produces) and the parameter "version".
+  product-name / product-version make SignPath refuse a file whose VERSIONINFO
+  does not say AudioLinker + the release version (a requirement of the
+  SignPath Foundation programme).
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="AudioLinker.exe" product-name="AudioLinker" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

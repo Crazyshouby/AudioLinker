@@ -12,7 +12,7 @@ Dans les [Releases](https://github.com/Crazyshouby/AudioLinker/releases) (chaque
 - `AudioLinker-<version>-portable.exe` : l'exécutable seul, à lancer depuis n'importe quel dossier.
 - Les empreintes SHA-256 sont dans le fichier `.sha256` de la release.
 
-Tant que l'installateur n'est pas signé numériquement, SmartScreen peut afficher « Windows a protégé votre ordinateur » : cliquez sur « Informations complémentaires » puis « Exécuter quand même », après avoir vérifié l'empreinte SHA-256. Sinon, voir [Compilation](#compilation) ci-dessous.
+Tant que l'installateur n'est pas signé numériquement, SmartScreen peut afficher « Windows a protégé votre ordinateur » : cliquez sur « Informations complémentaires » puis « Exécuter quand même », après avoir vérifié l'empreinte SHA-256. Voir la [politique de signature de code](CODE_SIGNING_POLICY.md). Sinon, voir [Compilation](#compilation) ci-dessous.
 
 ## Fonctionnalités
 
@@ -76,6 +76,10 @@ L'interface reprend le thème et l'organisation de KDX (Haxial) : un menu princi
 
 - `assets/common.css` : jetons de couleur et widgets partagés par les deux pages. Les valeurs viennent de l'apparence par défaut de KDX, relevées pixel par pixel sur les captures sans perte de sa documentation (fenêtre active rouge, barres de titre en dégradé, relief des boutons, rangées bleu marine et pêche). Aucun fichier de KDX n'est repris : tout est redessiné.
 - `assets/fonts.css`, `assets/icons.js` : ressources **générées** (polices Archivo et Overpass Mono en base64, pictogrammes). Elles sont versionnées ; le build n'exécute pas Python. Pour les régénérer : `python tools/gen_assets.py`. Les pictogrammes sont dessinés dans `tools/pixel_icons.py`.
+
+## Signature de code
+
+La [politique de signature de code](CODE_SIGNING_POLICY.md) décrit ce qui est signé, par qui, comment, et la politique de confidentialité d'AudioLinker (aucune donnée collectée). Les versions publiées sont pour l'instant non signées ; une demande de signature gratuite auprès de la SignPath Foundation est prévue (l'intégration est prête dans la CI).
 
 ## Licence
 

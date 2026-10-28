@@ -28,6 +28,7 @@ AppSupportURL={#AppUrl}/issues
 AppUpdatesURL={#AppUrl}/releases
 VersionInfoVersion={#AppVersion}.0
 VersionInfoProductName={#AppName}
+VersionInfoProductVersion={#AppVersion}
 VersionInfoDescription=Installation de {#AppName}
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
