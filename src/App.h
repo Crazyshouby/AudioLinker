@@ -195,6 +195,9 @@ COLORREF WindowBgForTheme(bool light);
 // --- Gui.cpp: main window ---
 void ApplyWindowTheme(HWND hwnd);
 std::wstring LoadHtmlResource(int resId);
+// Common settings of both WebView2 pages: no context menu / devtools /
+// accelerator keys, and no navigation away from the embedded page.
+void HardenWebView(ICoreWebView2* webview);
 void SuspendMainWebView();
 void ResumeMainWebView();
 void SaveWindowPlacement(HWND hwnd);

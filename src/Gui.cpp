@@ -63,6 +63,46 @@ void WebViewFatalError(HWND hwnd) {
     DestroyWindow(hwnd);
 }
 
+// The pages are fully embedded (NavigateToString) and contain no external
+// link, so any other navigation or popup can only be unintended -- block it
+// rather than let a stray link turn the app window into a browser.
+void HardenWebView(ICoreWebView2* webview) {
+    ComPtr<ICoreWebView2Settings> settings;
+    if (SUCCEEDED(webview->get_Settings(settings.GetAddressOf())) && settings) {
+        settings->put_AreDefaultContextMenusEnabled(FALSE);
+        settings->put_IsStatusBarEnabled(FALSE);
+        settings->put_IsZoomControlEnabled(FALSE);
+#ifdef NDEBUG
+        settings->put_AreDevToolsEnabled(FALSE);
+#endif
+        ComPtr<ICoreWebView2Settings3> settings3;
+        if (SUCCEEDED(settings.As(&settings3))) {
+            // F5 would reload the page and drop its state; Ctrl+P, Ctrl+F... are noise.
+            settings3->put_AreBrowserAcceleratorKeysEnabled(FALSE);
+        }
+    }
+    EventRegistrationToken token;
+    webview->add_NavigationStarting(
+        Callback<ICoreWebView2NavigationStartingEventHandler>(
+            [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
+                LPWSTR uri = nullptr;
+                if (SUCCEEDED(args->get_Uri(&uri)) && uri) {
+                    const std::wstring u = uri;
+                    if (u.rfind(L"data:", 0) != 0 && u.rfind(L"about:", 0) != 0) {
+                        args->put_Cancel(TRUE);
+                    }
+                    CoTaskMemFree(uri);
+                }
+                return S_OK;
+            }).Get(), &token);
+    webview->add_NewWindowRequested(
+        Callback<ICoreWebView2NewWindowRequestedEventHandler>(
+            [](ICoreWebView2*, ICoreWebView2NewWindowRequestedEventArgs* args) -> HRESULT {
+                args->put_Handled(TRUE);
+                return S_OK;
+            }).Get(), &token);
+}
+
 void OnWebViewControllerReady(HWND hwnd, ICoreWebView2Controller* controller) {
     g_webviewController = controller;
     // Explicitly sync WebView2's own visibility flag to the host window's
@@ -77,12 +117,7 @@ void OnWebViewControllerReady(HWND hwnd, ICoreWebView2Controller* controller) {
         return;
     }
 
-    ComPtr<ICoreWebView2Settings> settings;
-    if (SUCCEEDED(g_webview->get_Settings(settings.GetAddressOf())) && settings) {
-        settings->put_AreDefaultContextMenusEnabled(FALSE);
-        settings->put_IsStatusBarEnabled(FALSE);
-        settings->put_IsZoomControlEnabled(FALSE);
-    }
+    HardenWebView(g_webview.Get());
 
     // Matches the page's current background, so resizing never flashes the
     // wrong color behind the (asynchronously repainted) web content.
@@ -498,13 +533,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                             g_activeSetup.clear(); // latencies diverged from any preset
                             SaveConfig();
                             SendState();
-                            std::wstring msg = L"Calage micro appliqué : latences alignées sur "
+                            std::wstring summary = L"Calage micro appliqué : latences alignées sur "
                                                L"l'enceinte la plus lente (" +
                                                std::to_wstring(maxDelay) + L" ms).";
                             if (okCount < static_cast<int>(snap.outcomes.size())) {
-                                msg += L" Certaines enceintes n'ont pas pu être mesurées.";
+                                summary += L" Certaines enceintes n'ont pas pu être mesurées.";
                             }
-                            SendInfo(msg);
+                            SendInfo(summary);
                         } else {
                             SendError(L"Calage micro : le signal n'a pas été détecté. "
                                       L"Rapprochez le micro des enceintes et vérifiez leur volume.");

@@ -6,6 +6,11 @@ project(AudioLinker VERSION 1.1.0 LANGUAGES CXX RC)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Static CRT: the exe must run on a clean Windows without the VC++
+# Redistributable (it depends only on system DLLs). Matches the vendored
+# WebView2LoaderStatic.lib, which is itself built against the static CRT.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 set(GEN_DIR ${CMAKE_BINARY_DIR}/gen)
 file(MAKE_DIRECTORY ${GEN_DIR})
 configure_file(cmake/version.h.in ${GEN_DIR}/version.h @ONLY)
@@ -73,7 +78,10 @@ target_include_directories(AudioLinker PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/json)
 
 target_compile_definitions(AudioLinker PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
-target_compile_options(AudioLinker PRIVATE /utf-8)
+# /guard:cf: control-flow guard; /permissive-: standards conformance; /W4 keeps
+# the (currently warning-free) tree that way.
+target_compile_options(AudioLinker PRIVATE /utf-8 /W4 /permissive- /guard:cf)
+target_link_options(AudioLinker PRIVATE /guard:cf /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT)
 
 target_link_libraries(AudioLinker PRIVATE
     ole32

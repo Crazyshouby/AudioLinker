@@ -731,7 +731,6 @@ void AudioEngine::captureThreadProc(std::wstring sourceId, bool loopback, std::w
     ComScope com;
     TimerResolutionScope timerRes;
     HANDLE mmcssHandle = EnableProAudioMmcss();
-    const bool processMode = (sourcePid != 0);
 
     bool firstSession = true;
     while (running_.load()) {

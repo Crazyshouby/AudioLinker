@@ -99,12 +99,7 @@ void InitOptionsWebView(HWND hwnd) {
                     return S_OK;
                 }
 
-                ComPtr<ICoreWebView2Settings> settings;
-                if (SUCCEEDED(g_optionsWebview->get_Settings(settings.GetAddressOf())) && settings) {
-                    settings->put_AreDefaultContextMenusEnabled(FALSE);
-                    settings->put_IsStatusBarEnabled(FALSE);
-                    settings->put_IsZoomControlEnabled(FALSE);
-                }
+                HardenWebView(g_optionsWebview.Get());
 
                 g_optionsWebview->add_WebMessageReceived(
                     Callback<ICoreWebView2WebMessageReceivedEventHandler>(
