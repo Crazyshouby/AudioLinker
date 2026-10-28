@@ -25,8 +25,13 @@ jobs:
       # Optional code signing: add the repository secrets SIGN_PFX_BASE64
       # (the .pfx, base64) and SIGN_PFX_PASSWORD, nothing else to change.
       HAS_CERT: ${{ secrets.SIGN_PFX_BASE64 != '' }}
+      # Signing through SignPath (see RELEASING.md): active only on a release
+      # tag, once the repository variable SIGNPATH_ORGANIZATION_ID and the
+      # secret SIGNPATH_API_TOKEN exist. Takes precedence over the .pfx above.
+      HAS_SIGNPATH: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' && secrets.SIGNPATH_API_TOKEN != '' && startsWith(github.ref, 'refs/tags/v') }}
     outputs:
       version: ${{ steps.ver.outputs.version }}
+      signed: ${{ env.HAS_SIGNPATH == 'true' || env.HAS_CERT == 'true' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -75,7 +80,7 @@ jobs:
         run: choco install innosetup --no-progress -y
 
       - name: Prepare code signing
-        if: env.HAS_CERT == 'true'
+        if: env.HAS_CERT == 'true' && env.HAS_SIGNPATH != 'true'
         shell: pwsh
         env:
           SIGN_PFX_BASE64: ${{ secrets.SIGN_PFX_BASE64 }}
@@ -92,11 +97,85 @@ jobs:
           & $tool.FullName sign /f $pfx /p $env:SIGN_PFX_PASSWORD /tr http://timestamp.digicert.com /td sha256 /fd sha256 build\Release\AudioLinker.exe
           if ($LASTEXITCODE -ne 0) { throw 'Signature de AudioLinker.exe échouée' }
 
+      # --- SignPath, first request: AudioLinker.exe (it goes into the installer
+      # and is also published as the portable exe). A release signing request
+      # normally waits for a manual approval in SignPath: the timeout is long.
+      - name: Upload unsigned exe (SignPath)
+        if: env.HAS_SIGNPATH == 'true'
+        id: unsigned-exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-exe
+          path: build/Release/AudioLinker.exe
+          if-no-files-found: error
+
+      - name: Sign AudioLinker.exe (SignPath)
+        if: env.HAS_SIGNPATH == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'AudioLinker' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: exe
+          github-artifact-id: ${{ steps.unsigned-exe.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed-exe
+          parameters: |
+            version: "${{ steps.ver.outputs.version }}"
+
+      - name: Use the signed exe
+        if: env.HAS_SIGNPATH == 'true'
+        shell: pwsh
+        run: Copy-Item signed-exe\AudioLinker.exe build\Release\AudioLinker.exe -Force
+
       - name: Build installer
         shell: pwsh
         run: |
-          if ($env:HAS_CERT -eq 'true') { .\installer\build.ps1 -ExePath build\Release\AudioLinker.exe -Sign }
+          if ($env:HAS_CERT -eq 'true' -and $env:HAS_SIGNPATH -ne 'true') { .\installer\build.ps1 -ExePath build\Release\AudioLinker.exe -Sign }
           else { .\installer\build.ps1 -ExePath build\Release\AudioLinker.exe }
+
+      # --- SignPath, second request: the installer built with the signed exe.
+      # Its SHA-256 is recomputed afterwards: the published hash must be the
+      # one of the signed file.
+      - name: Upload unsigned installer (SignPath)
+        if: env.HAS_SIGNPATH == 'true'
+        id: unsigned-installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer
+          path: installer/Output/AudioLinker-Setup-${{ steps.ver.outputs.version }}.exe
+          if-no-files-found: error
+
+      - name: Sign the installer (SignPath)
+        if: env.HAS_SIGNPATH == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'AudioLinker' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed-installer
+          parameters: |
+            version: "${{ steps.ver.outputs.version }}"
+
+      - name: Use the signed installer, refresh its SHA-256, check both signatures
+        if: env.HAS_SIGNPATH == 'true'
+        shell: pwsh
+        run: |
+          $name = "AudioLinker-Setup-${{ steps.ver.outputs.version }}.exe"
+          Copy-Item "signed-installer\$name" "installer\Output\$name" -Force
+          .\installer\checksum.ps1 -Setup "installer\Output\$name"
+          foreach ($f in 'build\Release\AudioLinker.exe', "installer\Output\$name") {
+            $s = Get-AuthenticodeSignature $f
+            if ($s.Status -ne 'Valid') { throw "$f : signature $($s.Status)" }
+            "$f : signé par $($s.SignerCertificate.Subject)"
+          }
 
       # What a user does: install silently, check the files, uninstall.
       - name: Installer test (install, upgrade, uninstall)
@@ -142,10 +221,25 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
+      # Only the two final artifacts: the unsigned files sent to SignPath are
+      # artifacts of the same run and must never end up in the release.
       - uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: AudioLinker-*
           merge-multiple: true
+
+      # Fixed header of the release notes (how to install, how to check the
+      # download, signature status), then the generated list of changes.
+      - name: Release notes header
+        run: |
+          v="${{ needs.build.outputs.version }}"
+          notice=unsigned
+          [ "${{ needs.build.outputs.signed }}" = "true" ] && notice=signed
+          { sed "s/VERSION/$v/g" .github/release-header.md; cat ".github/release-notice-$notice.md"; printf '\n---\n\n'; } > header.md
+          cat header.md
 
       - name: Portable exe name
         run: mv dist/AudioLinker.exe "dist/AudioLinker-${{ needs.build.outputs.version }}-portable.exe"
@@ -168,5 +262,6 @@ jobs:
             dist/AudioLinker-Setup-*.exe
             dist/AudioLinker-Setup-*.exe.sha256
             dist/AudioLinker-*-portable.exe
+          body_path: header.md
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}

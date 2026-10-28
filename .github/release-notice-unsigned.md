@@ -1,0 +1,3 @@
+### Avertissement : version non signée
+
+Cette version n'est **pas signée numériquement**. Windows SmartScreen peut afficher « Windows a protégé votre ordinateur » : cliquez sur « Informations complémentaires » puis « Exécuter quand même », après avoir vérifié l'empreinte. Windows Defender peut aussi classer à tort le programme comme suspect (il peut s'inscrire au démarrage de Windows si vous le demandez) : si cela arrive, merci de [le signaler](https://github.com/Crazyshouby/AudioLinker/issues). Voir la [politique de signature de code](https://github.com/Crazyshouby/AudioLinker/blob/main/CODE_SIGNING_POLICY.md).

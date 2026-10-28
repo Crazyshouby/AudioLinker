@@ -43,8 +43,5 @@ Write-Host "Version $version, exe $exe"
 if ($LASTEXITCODE -ne 0) { throw "ISCC a échoué ($LASTEXITCODE)" }
 
 $setup = Join-Path $PSScriptRoot "Output\AudioLinker-Setup-$version.exe"
-$hash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
-# Unix line ending, so that `sha256sum -c` accepts the file on any system.
-[IO.File]::WriteAllText("$setup.sha256", "$hash *AudioLinker-Setup-$version.exe`n")
 Write-Host "OK : $setup ($([math]::Round((Get-Item $setup).Length / 1KB)) Ko)"
-Write-Host "SHA-256 : $hash"
+& (Join-Path $PSScriptRoot 'checksum.ps1') -Setup $setup
