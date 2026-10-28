@@ -18,7 +18,7 @@ L'exécutable prêt à l'emploi est publié dans les [Releases](https://github.c
 - **Setups** : configurations nommées, applicables via l'UI, le menu tray, un switcher global (`Ctrl+Alt+S`) ou `Ctrl+Maj+1-9` (désactivable). Basculer entre deux setups bâtis sur les mêmes enceintes se fait **sans coupure**.
 - **Automatisation** : par enceinte, « quand elle se connecte, jouer tel setup » et « quand elle se déconnecte, arrêter le groupe ».
 - **Entrées** : micro par défaut Windows, niveau et mute mémorisés par setup, VU-mètres.
-- **Intégration Windows** : icône de zone de notification (verte quand le groupe joue, notifications quand la fenêtre est cachée), muet global, raccourcis globaux personnalisables, thème clair/sombre, couleur d'accentuation système, démarrage avec Windows, DPI par moniteur, reprise après veille, surveillance de la sortie par défaut et réparation automatique après un arrêt brutal.
+- **Intégration Windows** : icône de zone de notification (verte quand le groupe joue, notifications quand la fenêtre est cachée), muet global, raccourcis globaux personnalisables, style KDX sombre, démarrage avec Windows, DPI par moniteur, reprise après veille, surveillance de la sortie par défaut et réparation automatique après un arrêt brutal.
 
 ## Prérequis
 
@@ -59,6 +59,13 @@ ctest --test-dir build
 - `src/DeviceManager.cpp` — énumération MMDevice et notifications de branchement.
 - `tests/` — tests unitaires (ring buffer, resampler, biquad, config) lancés par `ctest` et par la CI.
 
+## Style graphique
+
+L'interface reprend le thème de KDX (Haxial) : fenêtres à barre de titre sur fond rouge, panneaux gris anthracite, boutons biseautés, consoles noires à texte vert, fenêtre active cerclée de rouge, pictogrammes pixel-art. Il n'y a qu'un thème (sombre) : le réglage clair/sombre et la couleur d'accentuation Windows ont disparu.
+
+- `assets/common.css` : jetons de couleur et widgets partagés par les deux pages (valeurs relevées sur une capture de KDX).
+- `assets/fonts.css`, `assets/icons.js`, `assets/lava.css` : ressources **générées** (polices Archivo et Overpass Mono en base64, pictogrammes, fond). Elles sont versionnées ; le build n'exécute pas Python. Pour les régénérer : `python tools/gen_assets.py` (`--lava` pour refaire le fond, avec Chrome et Pillow). Les pictogrammes sont dessinés dans `tools/pixel_icons.py`.
+
 ## Licence
 
-[MIT](LICENSE). Le SDK WebView2 vendoré reste soumis à sa propre licence (`third_party/webview2/LICENSE.txt`), nlohmann/json à la sienne (`third_party/json/LICENSE.MIT`).
+[MIT](LICENSE). Le SDK WebView2 vendoré reste soumis à sa propre licence (`third_party/webview2/LICENSE.txt`), nlohmann/json à la sienne (`third_party/json/LICENSE.MIT`). Les polices Archivo et Overpass Mono sont sous licence SIL OFL 1.1 (`third_party/fonts/`).

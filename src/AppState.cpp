@@ -48,16 +48,17 @@ int& g_themeOverride = g_cfg.theme;
 
 // What every theme-driven decision (native chrome + the web content's
 // data-theme attribute) should actually use instead of the raw OS reading.
+// The KDX-style look has a single dark theme: neither the OS setting nor the
+// old Options override (g_themeOverride, kept so existing configs still load)
+// changes it any more.
 bool EffectiveLightTheme() {
-    if (g_themeOverride == 1) return true;
-    if (g_themeOverride == 2) return false;
-    return IsWindowsLightThemeEnabled();
+    return false;
 }
 
-// Must match ui.html's --bg for each theme (the host brush shows through
-// while the web content repaints after a resize).
-COLORREF WindowBgForTheme(bool light) {
-    return light ? RGB(0xE8, 0xE8, 0xE8) : RGB(0x14, 0x14, 0x14);
+// Must match common.css's --frame (the host brush shows through while the
+// web content repaints after a resize).
+COLORREF WindowBgForTheme(bool /*light*/) {
+    return RGB(0x16, 0x16, 0x16);
 }
 
 // OutputSettings / Setup live in Config.h with the rest of the persisted state.
