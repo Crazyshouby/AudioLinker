@@ -7,3 +7,9 @@
 // down (config-import relaunch via --restart) -- wait for its single-instance
 // mutex to be released instead of deferring to it and exiting.
 int RunApplication(HINSTANCE hInstance, int nCmdShow, bool startHidden, bool waitForPrevious);
+
+// --quit: asks the running instance (if any) to shut down the way the tray's
+// Quitter does -- group stopped, Windows' default output restored -- and waits
+// for it to exit. The installer uses it before replacing or removing the exe.
+// True when no instance is left (none was running, or it exited in time).
+bool QuitRunningInstance(DWORD timeoutMs);

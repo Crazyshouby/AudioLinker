@@ -41,12 +41,19 @@ void JournalInstall() { SetLogSink(OnLogLine); }
 
 void JournalAdd(int level, const std::wstring& text) {
     JournalLine line{ NowMs(), level, text };
+    // An event is often both logged and shown as a toast, with the same
+    // words: keep it once.
+    int checked = 0;
+    for (auto it = g_lines.rbegin(); it != g_lines.rend() && checked < 8; ++it, ++checked) {
+        if (it->text == text && line.ts - it->ts < 3000) return;
+    }
     g_lines.push_back(line);
     while (g_lines.size() > kMaxLines) g_lines.pop_front();
-    if (IsPanelOpen(PanelId::Journal)) {
-        json j = { { "type", "journalAdd" }, { "entry", LineJson(line) } };
-        PostToPanel(PanelId::Journal, FromUtf8(j.dump()));
-    }
+    // The Journal window shows it; the launcher counts what it has not seen.
+    json j = { { "type", "journalAdd" }, { "entry", LineJson(line) } };
+    std::wstring msg = FromUtf8(j.dump());
+    PostToPanel(PanelId::Journal, msg);
+    PostToPanel(PanelId::Launcher, msg);
 }
 
 void JournalFromMessage(LPARAM lParam) {

@@ -95,3 +95,14 @@ if not m:
     sys.exit(2)
 res = json.loads(m.group(1).replace("&quot;", '"').replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">"))
 print(json.dumps(res, indent=2, ensure_ascii=False))
+
+# A failing check is a failing exit code (the CI runs this).
+problems = list(res.get("errors") or [])
+problems += [k + ": " + v for k, v in res.get("steps", {}).items() if isinstance(v, str) and v.startswith("THROW")]
+layout = res.get("steps", {}).get("layout_setup_row_modified_playing")
+if isinstance(layout, dict) and layout.get("clashes"):
+    problems.append("overlapping elements in a setup row: " + ", ".join(layout["clashes"]))
+if problems:
+    print("UI SMOKE TEST FAILED:", *problems, sep="\n  ", file=sys.stderr)
+    sys.exit(1)
+print("UI smoke test: OK")

@@ -1,4 +1,5 @@
 #include "Gui.h"
+#include "CrashHandler.h"
 #include "DeviceManager.h"
 #include <cstdio>
 #include <io.h>
@@ -27,6 +28,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     bool listOnly = false;
     bool startHidden = false;
     bool waitForPrevious = false;
+    bool quitOther = false;
     for (int i = 1; i < argc; ++i) {
         if (wcscmp(argv[i], L"--list-devices") == 0) listOnly = true;
         else if (wcscmp(argv[i], L"--tray") == 0) startHidden = true;
@@ -34,8 +36,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
         // shutting down and holds the single-instance mutex -- wait for it
         // instead of bouncing off it (see RunApplication).
         else if (wcscmp(argv[i], L"--restart") == 0) waitForPrevious = true;
+        // Stop the running instance cleanly and exit (installer / scripts).
+        else if (wcscmp(argv[i], L"--quit") == 0) quitOther = true;
     }
     if (argv) LocalFree(argv);
+
+    if (quitOther) return QuitRunningInstance(20000) ? 0 : 1;
+    InstallCrashHandler();
 
     if (listOnly) {
         // WIN32 subsystem: there is no console unless we attach to the one

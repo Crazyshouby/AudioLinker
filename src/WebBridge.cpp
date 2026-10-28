@@ -120,8 +120,10 @@ json BuildState() {
     }
     // Which windows are open (the launcher buttons show it).
     j["panels"] = json::object();
+    j["panelsShaded"] = json::object();
     for (int i = 0; i < kPanelCount; ++i) {
         j["panels"][PanelKey(static_cast<PanelId>(i))] = IsPanelOpen(static_cast<PanelId>(i));
+        j["panelsShaded"][PanelKey(static_cast<PanelId>(i))] = IsPanelShaded(static_cast<PanelId>(i));
     }
     return j;
 }
@@ -175,7 +177,10 @@ void SendPeaks() {
     for (const auto& [id, peak] : g_engine.getMicPeaks()) {
         j["micPeaks"].push_back({ { "id", U8(id) }, { "peak", Milli(peak) } });
     }
-    PostJson(j);
+    // Ten times a second: only the windows that draw meters get them.
+    std::wstring text = FromUtf8(j.dump());
+    PostToPanel(PanelId::Outputs, text);
+    PostToPanel(PanelId::Levels, text);
 }
 
 // The persistent notice lives in the launcher, the window that is always there.
@@ -250,11 +255,12 @@ void SendCalStatus() {
     PostJson(j);
 }
 
-// Toasts posted while no window is showing never reach a page: keep them for
-// the next RestoreFromTray, and surface errors through a tray balloon right
-// away so a failed autostart at logon is not just lost.
-void RememberHiddenToast(const json& j, const std::wstring& balloonText) {
-    if (!g_mainWnd || AnyPanelVisible()) return;
+// A toast that found no window able to show it (all hidden in the tray, rolled
+// up, or their pages not up yet) is kept and replayed by FlushPendingToasts
+// once a page is ready, and an error also goes to a tray balloon right away so
+// a failed autostart at logon is not just lost.
+void RememberHiddenToast(const json& j, const std::wstring& balloonText, bool shown) {
+    if (!g_mainWnd || shown) return;
     if (g_pendingJson.size() >= 10) g_pendingJson.erase(g_pendingJson.begin());
     g_pendingJson.push_back(FromUtf8(j.dump()));
     if (!balloonText.empty()) ShowTrayBalloon(balloonText, NIIF_WARNING);
@@ -264,16 +270,16 @@ void RememberHiddenToast(const json& j, const std::wstring& balloonText) {
 // recorded in the Journal.
 void SendError(const std::wstring& message) {
     json j = { { "type", "error" }, { "message", U8(message) } };
-    PostToastTarget(FromUtf8(j.dump()));
+    bool shown = PostToastTarget(FromUtf8(j.dump()));
     JournalAdd(2, message);
-    RememberHiddenToast(j, message);
+    RememberHiddenToast(j, message, shown);
 }
 
 void SendInfo(const std::wstring& message) {
     json j = { { "type", "info" }, { "message", U8(message) } };
-    PostToastTarget(FromUtf8(j.dump()));
+    bool shown = PostToastTarget(FromUtf8(j.dump()));
     JournalAdd(0, message);
-    RememberHiddenToast(j, L"");
+    RememberHiddenToast(j, L"", shown);
 }
 
 // An error toast carrying one action button, which posts `command` back.
@@ -281,11 +287,19 @@ void SendErrorWithAction(const std::wstring& message, const std::wstring& comman
                          const std::wstring& label) {
     json j = { { "type", "error" }, { "message", U8(message) },
                { "action", U8(command) }, { "actionLabel", U8(label) } };
-    PostToastTarget(FromUtf8(j.dump()));
+    bool shown = PostToastTarget(FromUtf8(j.dump()));
     JournalAdd(2, message);
-    RememberHiddenToast(j, message);
+    RememberHiddenToast(j, message, shown);
 }
 
+
+void FlushPendingToasts() {
+    while (!g_pendingJson.empty()) {
+        std::wstring j = g_pendingJson.front();
+        if (!PostToastTarget(j)) return; // still nowhere to show them
+        g_pendingJson.erase(g_pendingJson.begin());
+    }
+}
 
 // --- Messages coming from the web UI ---
 
