@@ -2,7 +2,7 @@
 
 Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) ; les versions suivent [SemVer](https://semver.org/lang/fr/).
 
-## [1.2.0] — à publier
+## [1.2.0] — 2026-10-28
 
 Première version publiée (la 1.1.0 n'a existé que pendant le développement). Elle regroupe le moteur multi-sorties WASAPI, la correction de dérive d'horloge, le calage micro, l'égaliseur par sortie, les setups, les raccourcis globaux et la zone de notification, plus ce qui suit.
 
