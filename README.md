@@ -63,7 +63,7 @@ ctest --test-dir build
 
 L'interface reprend le thème de KDX (Haxial) : fenêtres à barre de titre sur fond rouge, panneaux gris anthracite, boutons biseautés, consoles noires à texte vert, fenêtre active cerclée de rouge, pictogrammes pixel-art. Il n'y a qu'un thème (sombre) : le réglage clair/sombre et la couleur d'accentuation Windows ont disparu.
 
-- `assets/common.css` : jetons de couleur et widgets partagés par les deux pages (valeurs relevées sur une capture de KDX).
+- `assets/common.css` : jetons de couleur et widgets partagés par les deux pages. Les valeurs viennent de l'apparence par défaut de KDX, relevées pixel par pixel sur les captures sans perte de sa documentation (fenêtre active rouge, barres de titre en dégradé, relief des boutons, rangées bleu marine et pêche). Aucun fichier de KDX n'est repris : tout est redessiné.
 - `assets/fonts.css`, `assets/icons.js`, `assets/lava.css` : ressources **générées** (polices Archivo et Overpass Mono en base64, pictogrammes, fond). Elles sont versionnées ; le build n'exécute pas Python. Pour les régénérer : `python tools/gen_assets.py` (`--lava` pour refaire le fond, avec Chrome et Pillow). Les pictogrammes sont dessinés dans `tools/pixel_icons.py`.
 
 ## Licence

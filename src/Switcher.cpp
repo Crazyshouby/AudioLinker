@@ -26,8 +26,8 @@ namespace switcher {
 struct Palette { COLORREF bg, border, text, muted, faint; };
 
 Palette CurrentPalette() {
-    return { RGB(0x32, 0x32, 0x32), RGB(0x8A, 0x02, 0x02), RGB(0xFF, 0xFF, 0xFF),
-             RGB(0xD0, 0xD0, 0xD0), RGB(0xA2, 0xA2, 0xA2) };
+    return { RGB(0x33, 0x33, 0x33), RGB(0x88, 0x00, 0x00), RGB(0xFF, 0xFF, 0xFF),
+             RGB(0xDD, 0xDD, 0xDD), RGB(0xA7, 0xAF, 0xB2) };
 }
 
 int g_index = -1;  // selected row
@@ -142,7 +142,7 @@ void Paint(HWND wnd, HDC target) {
         bool cur = (i == g_index);
         if (cur) {
             // KDX selected row: navy, square corners.
-            HBRUSH b = CreateSolidBrush(RGB(0x0A, 0x12, 0x62));
+            HBRUSH b = CreateSolidBrush(RGB(0x00, 0x11, 0x77));
             FillRect(hdc, &row, b);
             DeleteObject(b);
         }
@@ -154,9 +154,9 @@ void Paint(HWND wnd, HDC target) {
                            (checkedCount > 1 ? L" enceintes" : L" enceinte");
         RECT nameRc = { row.left + s(14), row.top, row.right - s(110), row.bottom };
         RECT cntRc = { row.right - s(106), row.top, row.right - s(14), row.bottom };
-        drawText(g_setups[i].name, nameRc, cur ? RGB(0xFE, 0xCE, 0x96) : pal.text, fontRow,
+        drawText(g_setups[i].name, nameRc, cur ? RGB(0xFF, 0x00, 0xFF) : pal.text, fontRow,
                  DT_LEFT | DT_VCENTER | DT_END_ELLIPSIS);
-        drawText(cnt, cntRc, cur ? RGB(0xFE, 0xCE, 0x96) : pal.faint, fontSmall, DT_RIGHT | DT_VCENTER);
+        drawText(cnt, cntRc, cur ? RGB(0xFF, 0x00, 0xFF) : pal.faint, fontSmall, DT_RIGHT | DT_VCENTER);
     }
 
     RECT hintRc = { m.padX, h - m.hintH - m.padBottom, w - m.padX, h - m.padBottom };

@@ -5,10 +5,13 @@
    page's own <style>.
 
    Design: a dark, flat-grey "windows on a red wallpaper" look after KDX
-   (Haxial). Values were measured on a KDX screenshot: frame #161616, title
-   bar #222222, panel #323232, buttons #363636 with a 1px light top/left and
-   dark bottom/right bevel, black text areas with green console text, red
-   (#8a0202) frame for the focused window, red bar fills. There is a single
+   (Haxial). Values come from KDX's own default appearance (lossless
+   screenshots of the KDX documentation, plus the Charcoal .hap): panel
+   #333333, buttons #333333 with a #666/#444 top highlight and #222/#111/#000
+   bottom shade, window frame #555/#222/#111 around a #000 outline (focused
+   window: #cc0000/#880000/#440000, red-gradient title bar), black text
+   fields with #00ff00 text and a 2px #880000 ring when focused, grey
+   gradient title bar (#0c0c0c to #8f8f8f) when not. There is a single
    theme -- no light variant, no system accent colour. Status colours only
    ever mean a state (green = ok, amber = warning, red = problem). The
    native side mirrors the frame and text colours (WindowBgForTheme in
@@ -18,32 +21,43 @@
 /*@lava.css@*/
 
 :root {
-  --frame: #161616;
-  --title: #222222;
-  --panel: #323232;
-  --btn: #363636;
-  --hi: #505050;
-  --lo: #101010;
-  --ink: #020202;
-  --line: #525252;
-  --red-frame: #8a0202;
+  --frame: #222222;
+  --title: linear-gradient(#0c0c0c, #8f8f8f);
+  --title-focus: linear-gradient(#320000, #c30000);
+  --panel: #333333;
+  --btn: #333333;
+  --hi: #666666;
+  --lo: #000000;
+  --ink: #000000;
+  --line: #555555;
+  --red-frame: #880000;
+  --red-hi: #cc0000;
   --bar: linear-gradient(#e83c3c, #c01010 45%, #8a0202);
+  --bevel: inset 0 1px 0 #666, inset 0 2px 0 #444, inset 0 -1px 0 #222, inset 0 -2px 0 #111;
+  --bevel-down: inset 0 1px 0 #000, inset 0 2px 0 #111, inset 0 -1px 0 #444;
+  /* Window frame: #555 highlight, #222 x2, #111, #000 inside the outline. */
+  --ring: inset 0 0 0 1px #555, inset 0 0 0 3px #222, inset 0 0 0 4px #111, inset 0 0 0 5px #000;
+  --ring-focus: inset 0 0 0 1px #cc0000, inset 0 0 0 3px #880000, inset 0 0 0 4px #440000, inset 0 0 0 5px #000;
 
   /* Names used throughout the pages. */
   --bg: var(--frame);
   --card: var(--panel);
   --card-2: #2a2a2a;
-  --border: #101010;
-  --border-soft: #484848;
+  --border: #000000;
+  --border-soft: #444444;
   --text: #ffffff;
-  --muted: #d0d0d0;
-  --faint: #a2a2a2;
-  --track-off: #2a2a2a;
+  --muted: #dddddd;
+  --faint: #a7afb2;
+  --track-off: #222222;
   --hover: rgba(255, 255, 255, 0.08);
   --accent: #d41818;
-  --accent-2: #fece96;
+  --accent-2: #ffcc99;
   --accent-rgb: 212, 24, 24;
-  --green: #23ed29;
+  --sel-bg: #001177;
+  --sel-fg: #ff00ff;
+  --hover-fg: #a8481a;
+  --away-bg: #353038;
+  --green: #00ff00;
   --warn: #faa320;
   --red: #ff5a4a;
   color-scheme: dark;
@@ -69,14 +83,11 @@ body {
 /* Bevelled button: light top/left edge, dark bottom/right edge. */
 .ghost-btn, .bevel {
   font: inherit; font-weight: 700; color: var(--text); cursor: pointer;
-  background: var(--btn); border: 1px solid var(--lo); border-top-color: var(--hi); border-left-color: #484848;
-  border-radius: 2px; box-shadow: inset 0 -1px 0 #1d1d1d;
+  background: var(--btn); border: 1px solid #000; border-radius: 3px; box-shadow: var(--bevel);
   padding: 4px 12px; min-height: 24px;
 }
-.ghost-btn:hover:not(:disabled) { background: #404040; }
-.ghost-btn:active:not(:disabled), .ghost-btn.on {
-  background: #2a2a2a; border-color: var(--hi) var(--lo) var(--lo) var(--hi); box-shadow: inset 1px 1px 0 #000;
-}
+.ghost-btn:hover:not(:disabled) { background: #3b3b3b; }
+.ghost-btn:active:not(:disabled), .ghost-btn.on { background: #2a2a2a; box-shadow: var(--bevel-down); }
 .ghost-btn:disabled { color: #7a7a7a; cursor: default; }
 .ghost-btn:focus-visible, .text-input:focus-visible, select.ghost-btn:focus-visible { outline: 2px solid var(--warn); outline-offset: 1px; }
 select.ghost-btn { padding-right: 6px; }
@@ -87,14 +98,13 @@ select.ghost-btn option { background: #2a2a2a; color: #fff; }
 input[type="range"] {
   -webkit-appearance: none; flex: 1; height: 14px; outline: none; cursor: pointer;
   background: linear-gradient(#e83c3c, #c01010 45%, #8a0202) 0 0 / 50% 100% no-repeat, var(--track-off);
-  border: 1px solid var(--lo); border-bottom-color: #484848;
+  border: 1px solid #000; box-shadow: 0 1px 0 #444;
 }
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none; width: 12px; height: 20px; cursor: pointer;
-  background: var(--btn); border: 1px solid var(--lo); border-top-color: #606060; border-left-color: #585858;
-  border-radius: 1px; box-shadow: inset 0 -1px 0 #1d1d1d;
+  background: var(--btn); border: 1px solid #000; border-radius: 2px; box-shadow: var(--bevel);
 }
-input[type="range"]:hover::-webkit-slider-thumb { background: #444; }
+input[type="range"]:hover::-webkit-slider-thumb { background: #3b3b3b; }
 input[type="range"]:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
 .val { width: 56px; flex: none; text-align: right; font: 600 12px "Overpass Mono", Consolas, monospace; font-stretch: 100%; color: var(--green); font-variant-numeric: tabular-nums; }
 
@@ -104,13 +114,13 @@ input[type="range"]:focus-visible { outline: 2px solid var(--warn); outline-offs
 .switch input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
 .track {
   position: absolute; inset: 0; background: var(--ink);
-  border: 1px solid var(--lo); border-bottom-color: #5a5a5a; border-right-color: #5a5a5a; pointer-events: none;
+  border: 1px solid #000; box-shadow: 0 1px 0 #555; pointer-events: none;
 }
 .track::after {
   content: ""; position: absolute; left: 4.5px; top: 1px; width: 4px; height: 8px;
   border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg) scale(0);
 }
-.switch input:checked + .track { background: var(--bar); border-color: #000; border-bottom-color: #ff8a74; border-right-color: #ff8a74; }
+.switch input:checked + .track { background: var(--bar); box-shadow: 0 1px 0 #555, inset 0 1px 0 #ff8a74; }
 .switch input:checked + .track::after { transform: rotate(45deg) scale(1); }
 .switch input:focus-visible + .track { outline: 2px solid var(--warn); outline-offset: 1px; }
 
@@ -127,12 +137,12 @@ input[type="range"]:focus-visible { outline: 2px solid var(--warn); outline-offs
 .toast {
   display: flex; align-items: center; gap: 14px; max-width: 100%;
   background: var(--ink); color: var(--red);
-  border: 1px solid var(--red-frame); box-shadow: 0 0 0 1px #000, 4px 5px 0 rgba(0, 0, 0, 0.55);
+  border: 2px solid var(--red-frame); box-shadow: 0 0 0 1px #000, 4px 5px 0 rgba(0, 0, 0, 0.55);
   padding: 8px 14px; font: 600 12px/1.4 "Overpass Mono", Consolas, monospace; font-stretch: 100%; cursor: pointer;
   opacity: 0; transform: translateY(12px); transition: opacity 0.25s, transform 0.25s;
   pointer-events: auto;
 }
-.toast.ok { color: var(--green); border-color: #0a7a14; }
+.toast.ok { color: var(--green); border-color: #007f00; }
 .toast.show { opacity: 1; transform: none; }
 .toast-text { min-width: 0; }
 .toast .toast-action { flex: none; padding: 3px 10px; min-height: 0; }

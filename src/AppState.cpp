@@ -58,7 +58,7 @@ bool EffectiveLightTheme() {
 // Must match common.css's --frame (the host brush shows through while the
 // web content repaints after a resize).
 COLORREF WindowBgForTheme(bool /*light*/) {
-    return RGB(0x16, 0x16, 0x16);
+    return RGB(0x22, 0x22, 0x22);
 }
 
 // OutputSettings / Setup live in Config.h with the rest of the persisted state.

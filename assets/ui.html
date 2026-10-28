@@ -8,30 +8,31 @@
 #app { display: flex; flex-direction: column; height: 100%; padding: 14px 16px 10px; gap: 12px; }
 
 /* ---------- Windows: frame + title bar + recessed panel ---------- */
+/* Frame = four concentric lines (--ring); the title bar runs over it, full
+   width. The window that holds the focus is red (see setFocusWin()). */
 .win {
-  background: var(--frame); border: 1px solid #000; box-shadow: 0 0 0 1px #3c3c3c, 4px 5px 0 rgba(0, 0, 0, 0.5);
-  display: flex; flex-direction: column; min-width: 0;
+  background: var(--frame); border: 1px solid #000; box-shadow: var(--ring), 4px 5px 0 rgba(0, 0, 0, 0.5);
+  display: flex; flex-direction: column; min-width: 0; padding: 0 5px 5px;
 }
 .tb {
-  flex: none; height: 22px; display: flex; align-items: center; justify-content: center;
-  background: var(--title); border-bottom: 1px solid #0e0e0e; color: var(--text); position: relative;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 28px;
+  flex: none; height: 21px; margin: 0 -5px 4px; display: flex; align-items: center; justify-content: center;
+  background: var(--title); border-bottom: 1px solid #000; color: var(--text); position: relative;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 28px; text-shadow: 0 1px 0 #000;
 }
 .cb {
-  flex: 1; min-height: 0; margin: 0 3px 3px; padding: 8px; background: var(--panel);
-  border: 1px solid #0e0e0e; box-shadow: inset 1px 1px 0 #444; display: flex; flex-direction: column;
+  flex: 1; min-height: 0; padding: 8px; background: var(--panel); display: flex; flex-direction: column;
 }
-.win.focus { background: var(--red-frame); box-shadow: 0 0 0 1px #b01010, 4px 5px 0 rgba(0, 0, 0, 0.5); }
-.win.focus .tb { background: var(--red-frame); border-bottom-color: #5a0000; }
+.win.focus { background: #880000; box-shadow: var(--ring-focus), 4px 5px 0 rgba(0, 0, 0, 0.5); }
+.win.focus .tb { background: var(--title-focus); border-bottom-color: #440000; }
 
 /* Scroll bars: dark track, bevelled thumb, small arrow buttons. */
 ::-webkit-scrollbar { width: 11px; height: 11px; }
-::-webkit-scrollbar-track { background: #262626; }
-::-webkit-scrollbar-thumb { background: var(--btn); border: 1px solid var(--lo); border-top-color: var(--hi); border-left-color: #484848; }
-::-webkit-scrollbar-corner { background: #262626; }
+::-webkit-scrollbar-track { background: #333; box-shadow: inset 1px 0 0 #000; }
+::-webkit-scrollbar-thumb { background: var(--btn); border: 1px solid #000; border-radius: 2px; box-shadow: var(--bevel); }
+::-webkit-scrollbar-corner { background: #333; }
 ::-webkit-scrollbar-button:single-button {
   display: block; width: 11px; height: 11px; background-color: #3a3a3a; background-repeat: no-repeat; background-position: center;
-  border: 1px solid var(--lo); border-top-color: var(--hi);
+  border: 1px solid #000; box-shadow: var(--bevel);
 }
 ::-webkit-scrollbar-button:vertical:start:decrement { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='5'%3E%3Cpath d='M0 5h7L3.5 0z' fill='%23fff'/%3E%3C/svg%3E"); }
 ::-webkit-scrollbar-button:vertical:end:increment { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='5'%3E%3Cpath d='M0 0h7L3.5 5z' fill='%23fff'/%3E%3C/svg%3E"); }
@@ -53,7 +54,7 @@ header.win { flex: none; }
 /* Status readout: a black console strip with a red frame. */
 .status {
   display: flex; align-items: center; gap: 8px; min-width: 0; background: var(--ink);
-  border: 1px solid var(--red-frame); box-shadow: 0 0 0 1px #000; padding: 6px 10px; color: var(--green);
+  border: 2px solid var(--red-frame); padding: 5px 9px; color: var(--green);
   font: 600 12px "Overpass Mono", Consolas, monospace; font-stretch: 100%;
 }
 .status > span:last-child { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -66,15 +67,16 @@ header.win { flex: none; }
    (stopping is the quiet, deliberate gesture). */
 #toggleBtn {
   position: relative; font: inherit; font-weight: 700; color: #fff; cursor: pointer; min-width: 150px; height: 30px;
-  background: var(--bar); border: 1px solid #000; border-top-color: #ff8a74; border-left-color: #ff6a58;
-  border-radius: 2px; box-shadow: inset 0 -1px 0 #5a0000; padding: 0 16px;
+  background: var(--btn); border: 1px solid #000; border-radius: 3px; padding: 0 16px;
+  /* The default button of a KDX dialog: red double ring around the bevel. */
+  box-shadow: var(--bevel), 0 0 0 1px #000, 0 0 0 2px #cc0000, 0 0 0 3px #880000, 0 0 0 4px #000;
+  margin: 0 4px;
 }
-#toggleBtn:hover { filter: brightness(1.12); }
-#toggleBtn:active { filter: brightness(0.88); }
-#toggleBtn:disabled { cursor: default; filter: saturate(0.3) brightness(0.8); }
+#toggleBtn:hover { background: #3b3b3b; }
+#toggleBtn:active { background: #2a2a2a; }
+#toggleBtn:disabled { cursor: default; color: #7a7a7a; }
 #toggleBtn:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
-#toggleBtn.stop { background: var(--btn); border-color: var(--lo); border-top-color: var(--hi); border-left-color: #484848; box-shadow: inset 0 -1px 0 #1d1d1d; }
-#toggleBtn.stop:hover { filter: none; background: #404040; }
+#toggleBtn.stop { box-shadow: var(--bevel); }
 #toggleBtn .spin {
   display: none; width: 11px; height: 11px; border-radius: 50%;
   border: 2px solid rgba(255,255,255,0.35); border-top-color: #fff;
@@ -85,18 +87,17 @@ header.win { flex: none; }
 
 .icon-btn {
   flex: none; width: 30px; height: 30px; cursor: pointer; display: grid; place-items: center; padding: 0;
-  background: var(--btn); border: 1px solid var(--lo); border-top-color: var(--hi); border-left-color: #484848;
-  border-radius: 2px; box-shadow: inset 0 -1px 0 #1d1d1d;
+  background: var(--btn); border: 1px solid #000; border-radius: 3px; box-shadow: var(--bevel);
 }
-.icon-btn:hover { background: #404040; }
+.icon-btn:hover { background: #3b3b3b; }
 .icon-btn:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
-.icon-btn.on { background: #2a2a2a; border-color: var(--hi) var(--lo) var(--lo) var(--hi); box-shadow: inset 1px 1px 0 #000; }
+.icon-btn.on { background: #2a2a2a; box-shadow: var(--bevel-down); }
 
 /* Persistent notice under the header (source lost, audio left the group...)
    -- unlike a toast, it stays as long as the condition does. */
 #banner {
   display: flex; align-items: center; gap: 12px; flex: none; background: var(--ink);
-  border: 1px solid var(--red-frame); box-shadow: 0 0 0 1px #000; color: var(--warn); padding: 7px 12px;
+  border: 2px solid var(--red-frame); color: var(--warn); padding: 6px 11px;
   font: 600 12px/1.4 "Overpass Mono", Consolas, monospace; font-stretch: 100%;
 }
 #banner[hidden] { display: none; }
@@ -113,7 +114,7 @@ main { flex: 1; display: flex; flex-direction: row; gap: 12px; min-height: 0; }
 /* ---------- Device list ---------- */
 #devicesCard { flex: 1; min-width: 0; min-height: 150px; }
 #devicesCard > .cb { gap: 8px; }
-.list { flex: 1; min-height: 0; overflow-y: auto; background: var(--panel); border: 1px solid #0e0e0e; box-shadow: inset 1px 1px 0 #444; }
+.list { flex: 1; min-height: 0; overflow-y: auto; background: var(--panel); border: 1px solid #000; box-shadow: 0 1px 0 #555; }
 #devicesToolbar { flex: none; flex-wrap: nowrap; }
 #devicesToolbar #sMasterVol { min-width: 0; }
 #devicesToolbar label { width: auto; flex: none; }
@@ -122,12 +123,12 @@ main { flex: 1; display: flex; flex-direction: row; gap: 12px; min-height: 0; }
 .seg-tabs { display: flex; flex: none; gap: 0; }
 .seg-tab {
   font: inherit; font-weight: 700; color: var(--text); cursor: pointer; padding: 3px 14px; min-height: 22px;
-  background: var(--btn); border: 1px solid var(--lo); border-top-color: var(--hi); border-left-color: #484848; box-shadow: inset 0 -1px 0 #1d1d1d;
+  background: var(--btn); border: 1px solid #000; box-shadow: var(--bevel);
 }
-.seg-tab:first-child { border-radius: 2px 0 0 2px; }
-.seg-tab:last-child { border-radius: 0 2px 2px 0; border-left-color: var(--lo); }
-.seg-tab:hover { background: #404040; }
-.seg-tab.active { background: #2a2a2a; border-color: var(--hi) var(--lo) var(--lo) var(--hi); box-shadow: inset 1px 1px 0 #000; }
+.seg-tab:first-child { border-radius: 3px 0 0 3px; }
+.seg-tab:last-child { border-radius: 0 3px 3px 0; }
+.seg-tab:hover { background: #3b3b3b; }
+.seg-tab.active { background: #2a2a2a; box-shadow: var(--bevel-down); }
 
 /* INPUTS tab: single choice + hint line under the list */
 .chk.radio .box { border-radius: 50%; }
@@ -145,17 +146,19 @@ main { flex: 1; display: flex; flex-direction: row; gap: 12px; min-height: 0; }
 
 /* Rows: ruled lines; hover = peach, selected = navy, custom colour = left bar. */
 .device {
-  display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 6px; border-left: 4px solid transparent;
+  display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 6px; border-left: 6px solid transparent;
   border-bottom: 1px solid var(--line); cursor: pointer; outline: none;
 }
 .device[style*="--dev-color"] { border-left-color: var(--dev-color); }
-.device:hover { background: var(--accent-2); color: #4a3220; }
+.device:hover { background: var(--accent-2); color: var(--hover-fg); }
 .device:focus-visible { outline: 2px solid var(--warn); outline-offset: -2px; }
-.device.sel { background: #0a1262; color: #c98bff; }
+.device.sel { background: var(--sel-bg); color: var(--sel-fg); }
+.device.is-muted { background: var(--away-bg); color: var(--faint); }
+.device.is-muted.sel { background: var(--sel-bg); }
 .device.sel.open { border-bottom-color: transparent; }
 .device.dragging { opacity: 0.4; }
-.device:hover .badge, .setup:hover .badge { color: #4a3220; border-color: #a08060; background: #f0c088; }
-.device:hover .grip, .setup:hover .setup-ico { color: #4a3220; }
+.device:hover .badge, .setup:hover .badge { color: var(--hover-fg); border-color: #c89060; background: #ffddb8; }
+.device:hover .grip, .setup:hover .setup-ico { color: var(--hover-fg); }
 
 .grip {
   flex: none; width: 12px; text-align: center; color: var(--faint);
@@ -185,8 +188,9 @@ main { flex: 1; display: flex; flex-direction: row; gap: 12px; min-height: 0; }
 .dev-kind svg { display: block; }
 .dev-name { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .device.is-muted .dev-name { color: var(--faint); }
+.device.sel .dev-name { color: var(--sel-fg); }
 .name-edit {
-  width: 100%; background: var(--ink); border: 1px solid var(--red-frame); box-shadow: 0 0 0 1px #000;
+  width: 100%; background: var(--ink); border: 2px solid var(--red-frame);
   color: var(--green); font: 600 12px "Overpass Mono", Consolas, monospace; font-stretch: 100%;
   padding: 2px 6px; outline: none; caret-color: #e83c3c;
 }
@@ -198,20 +202,20 @@ main { flex: 1; display: flex; flex-direction: row; gap: 12px; min-height: 0; }
   display: grid; place-items: center; opacity: 0; transition: opacity 0.12s;
 }
 .device:hover .dev-id-btn, .device:focus-within .dev-id-btn { opacity: 1; }
-.dev-id-btn:hover { background: var(--btn); border-color: var(--lo); border-top-color: var(--hi); }
+.dev-id-btn:hover { background: var(--btn); border-color: #000; box-shadow: var(--bevel); }
 
 /* ---------- Per-speaker context menu (identify / mute / color / automation) ---------- */
 #ctxMenu {
   position: fixed; z-index: 20; min-width: 240px; max-width: 340px; display: none;
-  background: var(--panel); border: 1px solid #000; box-shadow: 0 0 0 1px #3c3c3c, 4px 5px 0 rgba(0, 0, 0, 0.5); padding: 3px;
+  background: var(--panel); border: 1px solid #000; box-shadow: var(--ring), 4px 5px 0 rgba(0, 0, 0, 0.5); padding: 6px;
 }
 #ctxMenu.show { display: block; }
 .ctx-title {
-  font-size: 11px; color: var(--faint); padding: 4px 8px 6px; background: var(--title); margin: -3px -3px 3px;
+  font-size: 11px; color: var(--faint); padding: 4px 8px 6px; background: var(--title); margin: -6px -6px 4px; color: #fff; text-shadow: 0 1px 0 #000;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center;
 }
 .ctx-item { display: flex; align-items: center; gap: 8px; padding: 5px 8px; font-size: 12px; color: var(--text); cursor: pointer; }
-.ctx-item:hover { background: #0a1262; color: #c98bff; }
+.ctx-item:hover { background: var(--sel-bg); color: var(--sel-fg); }
 .ctx-check { width: 14px; flex: none; color: var(--green); text-align: center; }
 .ctx-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ctx-sep { height: 1px; background: var(--line); margin: 4px 6px; }
@@ -255,11 +259,11 @@ main { flex: 1; display: flex; flex-direction: row; gap: 12px; min-height: 0; }
 .modal.show { opacity: 1; pointer-events: auto; }
 .modal-panel {
   width: 460px; max-width: calc(100vw - 40px); max-height: 80%; overflow-y: auto;
-  background: var(--frame); border: 1px solid #000; box-shadow: 0 0 0 1px #3c3c3c, 6px 8px 0 rgba(0, 0, 0, 0.55); padding: 0 3px 3px;
+  background: #880000; border: 1px solid #000; box-shadow: var(--ring-focus), 6px 8px 0 rgba(0, 0, 0, 0.55); padding: 0 5px 5px;
 }
 .modal-head {
-  display: flex; align-items: center; justify-content: center; position: relative; height: 22px;
-  margin: 0 -3px 3px; background: var(--title); border-bottom: 1px solid #0e0e0e;
+  display: flex; align-items: center; justify-content: center; position: relative; height: 21px;
+  margin: 0 -5px 4px; background: var(--title-focus); border-bottom: 1px solid #440000;
 }
 .modal-head h2 { font-size: 12px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70%; }
 .modal-close {
@@ -267,17 +271,17 @@ main { flex: 1; display: flex; flex-direction: row; gap: 12px; min-height: 0; }
   color: #fff; font: 800 10px/1 "Archivo", sans-serif; cursor: pointer; padding: 0; display: grid; place-items: center;
 }
 .modal-close:hover { background: #fff; color: #000; }
-.modal-body { background: var(--panel); border: 1px solid #0e0e0e; box-shadow: inset 1px 1px 0 #444; padding: 12px; }
+.modal-body { background: var(--panel); padding: 12px; }
 .confirm-text { font-size: 12.5px; font-weight: 600; color: var(--muted); line-height: 1.5; user-select: none; }
 .confirm-text b { color: var(--text); }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .confirm-actions .ghost-btn { padding: 5px 16px; }
 .danger-btn {
   font: inherit; font-weight: 700; color: #fff; cursor: pointer; padding: 5px 16px; min-height: 24px;
-  background: var(--bar); border: 1px solid #000; border-top-color: #ff8a74; border-left-color: #ff6a58; border-radius: 2px;
-  box-shadow: inset 0 -1px 0 #5a0000;
+  background: var(--btn); border: 1px solid #000; border-radius: 3px;
+  box-shadow: var(--bevel), 0 0 0 1px #000, 0 0 0 2px #cc0000, 0 0 0 3px #880000, 0 0 0 4px #000; margin: 0 4px;
 }
-.danger-btn:hover { filter: brightness(1.12); }
+.danger-btn:hover { background: #3b3b3b; }
 
 .row > label { width: 68px; flex: none; color: var(--text); }
 
@@ -285,22 +289,20 @@ main { flex: 1; display: flex; flex-direction: row; gap: 12px; min-height: 0; }
 .seg { display: flex; gap: 0; }
 .seg button {
   font: inherit; font-weight: 700; color: var(--text); cursor: pointer; padding: 3px 14px; min-height: 22px;
-  background: var(--btn); border: 1px solid var(--lo); border-top-color: var(--hi); border-left-color: #484848; box-shadow: inset 0 -1px 0 #1d1d1d;
+  background: var(--btn); border: 1px solid #000; box-shadow: var(--bevel);
 }
-.seg button:first-child { border-radius: 2px 0 0 2px; }
-.seg button:last-child { border-radius: 0 2px 2px 0; }
-.seg button + button { border-left-color: var(--lo); }
-.seg button:hover { background: #404040; }
-.seg button.on { background: #2a2a2a; border-color: var(--hi) var(--lo) var(--lo) var(--hi); box-shadow: inset 1px 1px 0 #000; }
+.seg button:first-child { border-radius: 3px 0 0 3px; }
+.seg button:last-child { border-radius: 0 3px 3px 0; }
+.seg button:hover { background: #3b3b3b; }
+.seg button.on { background: #2a2a2a; box-shadow: var(--bevel-down); }
 
 /* ---------- Speaker sheet (opens in place, under the selected row) ---------- */
-/* The focused window of KDX: red frame. */
 #sheet {
   margin: 4px 4px 8px; padding: 10px 12px 12px; background: var(--panel);
-  border: 2px solid var(--red-frame); box-shadow: 0 0 0 1px #000; cursor: default; color: var(--text);
+  border: 1px solid #000; box-shadow: 0 1px 0 #555, inset 0 1px 0 #444; cursor: default; color: var(--text);
 }
 #sheet[hidden] { display: none; }
-#eqCurveWrap { position: relative; height: 130px; background: var(--ink); border: 1px solid var(--red-frame); box-shadow: 0 0 0 1px #000; }
+#eqCurveWrap { position: relative; height: 130px; background: var(--ink); border: 2px solid var(--red-frame); }
 /* Live 10-band spectrum behind the curve, from AudioEngine's real per-band
    meter (see the JS comment above startEqFlow()) -- kept low-contrast so it
    sits strictly behind the curve/points instead of competing with them. */
@@ -312,7 +314,7 @@ main { flex: 1; display: flex; flex-direction: row; gap: 12px; min-height: 0; }
 .eq-point { fill: #c8c8c8; stroke: #000; stroke-width: 2; cursor: ns-resize; }
 .eq-point:hover, .eq-point.dragging { fill: #fff; }
 .eq-freq-label { fill: var(--faint); font-size: 10px; text-anchor: middle; }
-.eq-db-value { fill: var(--green); font: 600 10px "Overpass Mono", Consolas, monospace; text-anchor: middle; font-variant-numeric: tabular-nums; }
+.eq-db-value { fill: #00ff00; font: 600 10px "Overpass Mono", Consolas, monospace; text-anchor: middle; font-variant-numeric: tabular-nums; }
 #eqControls { display: grid; gap: 10px; margin-top: 10px; grid-template-columns: minmax(0, 1fr); }
 #eqControls > .row { min-width: 0; }
 .sheet-hint { font-size: 11px; font-weight: 600; color: var(--faint); margin-top: 2px; }
@@ -325,19 +327,18 @@ main { flex: 1; display: flex; flex-direction: row; gap: 12px; min-height: 0; }
   display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 6px; border-left: 4px solid transparent;
   border-bottom: 1px solid var(--line); cursor: pointer; outline: none;
 }
-.setup:hover { background: var(--accent-2); color: #4a3220; }
+.setup:hover { background: var(--accent-2); color: var(--hover-fg); }
 .setup:focus-visible { outline: 2px solid var(--warn); outline-offset: -2px; }
 /* Playing = black row, red bar and red text; selected (loaded) = navy. */
-.setup.playing { border-left-color: #c01010; background: var(--ink); color: var(--red); }
-.setup.playing:hover { background: var(--accent-2); color: #4a3220; }
-.setup.on, .setup.on:hover, .setup.playing.on { background: #0a1262; color: #c98bff; }
+.setup.playing { border-left-color: #da0000; background: var(--ink); color: var(--red); }
+.setup.playing:hover { background: var(--accent-2); color: var(--hover-fg); }
+.setup.on, .setup.on:hover, .setup.playing.on { background: var(--sel-bg); color: var(--sel-fg); }
 .setup-play {
   flex: none; width: 26px; height: 24px; cursor: pointer; display: grid; place-items: center; color: var(--text);
-  background: var(--btn); border: 1px solid var(--lo); border-top-color: var(--hi); border-left-color: #484848;
-  border-radius: 2px; box-shadow: inset 0 -1px 0 #1d1d1d;
+  background: var(--btn); border: 1px solid #000; border-radius: 3px; box-shadow: var(--bevel);
 }
-.setup-play:hover { background: #404040; }
-.setup-play.playing { background: #2a2a2a; border-color: var(--hi) var(--lo) var(--lo) var(--hi); box-shadow: inset 1px 1px 0 #000; color: var(--red); }
+.setup-play:hover { background: #3b3b3b; }
+.setup-play.playing { background: #2a2a2a; box-shadow: var(--bevel-down); color: var(--red); }
 .setup-ico {
   flex: none; min-width: 26px; color: var(--faint); font: 600 11px "Overpass Mono", Consolas, monospace; font-stretch: 100%;
 }
@@ -365,15 +366,16 @@ main { flex: 1; display: flex; flex-direction: row; gap: 12px; min-height: 0; }
 
 /* ---------- Text inputs: black field, red frame, green text ---------- */
 .text-input {
-  flex: 1; min-width: 0; background: var(--ink); border: 1px solid var(--red-frame); box-shadow: 0 0 0 1px #000;
-  color: var(--green); padding: 5px 8px; font: 600 12px "Overpass Mono", Consolas, monospace; font-stretch: 100%;
+  flex: 1; min-width: 0; background: var(--ink); border: 2px solid #111;
+  color: var(--green); padding: 4px 7px; font: 600 12px "Overpass Mono", Consolas, monospace; font-stretch: 100%;
   outline: none; caret-color: #e83c3c;
 }
+.text-input:focus { border-color: var(--red-frame); }
 .text-input:disabled { opacity: 0.45; }
 .text-input::placeholder { color: var(--faint); }
 select.text-input {
-  background: var(--btn); border: 1px solid var(--lo); border-top-color: var(--hi); border-left-color: #484848; box-shadow: inset 0 -1px 0 #1d1d1d;
-  color: var(--text); font: inherit; font-weight: 700; border-radius: 2px;
+  background: var(--btn); border: 1px solid #000; box-shadow: var(--bevel);
+  color: var(--text); font: inherit; font-weight: 700; border-radius: 3px;
 }
 /* ---------- Mic calibration modal ---------- */
 .cal-row { display: flex; align-items: center; gap: 10px; padding: 5px 2px; font-size: 12.5px; }
@@ -386,7 +388,7 @@ select.text-input {
 
 /* ---------- Footer ---------- */
 footer {
-  flex: none; text-align: center; background: var(--ink); border: 1px solid var(--red-frame); box-shadow: 0 0 0 1px #000;
+  flex: none; text-align: center; background: var(--ink); border: 2px solid var(--red-frame);
   color: var(--green); padding: 4px 8px; font: 600 11px "Overpass Mono", Consolas, monospace; font-stretch: 100%;
 }
 footer:empty { display: none; }
@@ -1997,6 +1999,18 @@ if (bridge) {
   });
   post("ready");
 }
+
+// The window holding the focus is the red one (KDX: only the active window
+// has the red frame and title bar). Clicking or tabbing into a window
+// makes it the active one.
+function setFocusWin(win) {
+  for (const w of document.querySelectorAll(".win")) w.classList.toggle("focus", w === win);
+}
+for (const w of document.querySelectorAll(".win")) {
+  w.addEventListener("mousedown", () => setFocusWin(w));
+  w.addEventListener("focusin", () => setFocusWin(w));
+}
+setFocusWin(document.getElementById("devicesCard"));
 </script>
 </body>
 </html>
