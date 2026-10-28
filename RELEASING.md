@@ -41,15 +41,27 @@ Un tag contenant `-` est publié comme préversion.
 
 ## 4. Signature de code (à faire avant la première diffusion large)
 
-Sans signature, SmartScreen avertit à chaque téléchargement, et l'analyse comportementale de Windows Defender peut classer l'exécutable à tort comme persistant (`Behavior:Win32/Persistence.A!ml`), parce qu'il peut s'inscrire au démarrage de Windows. C'est un faux positif, mais il faut le prévenir :
+Sans signature, SmartScreen avertit à chaque téléchargement, et l'analyse comportementale de Windows Defender peut classer l'exécutable à tort comme persistant (`Behavior:Win32/Persistence.A!ml`), parce qu'il peut s'inscrire au démarrage de Windows. C'est un faux positif, mais il faut le prévenir.
 
-1. Obtenir un certificat de signature de code (OV ou EV, ou Azure Trusted Signing) au format `.pfx`.
-2. Ajouter deux secrets au dépôt GitHub : `SIGN_PFX_BASE64` (le `.pfx` en base64 : `[Convert]::ToBase64String([IO.File]::ReadAllBytes("cert.pfx"))`) et `SIGN_PFX_PASSWORD`.
-3. Rien d'autre : la CI signe l'exécutable, l'installateur et le désinstallateur, avec horodatage.
+**Ce qui a changé** : depuis le 1er juin 2023, les autorités de certification exigent que la clé privée d'un certificat de signature de code (OV ou EV) soit générée et gardée dans un module matériel (jeton ou HSM). **Un `.pfx` exportable n'existe donc plus pour un certificat neuf.** L'étape « Prepare code signing » du workflow (secrets `SIGN_PFX_BASE64` / `SIGN_PFX_PASSWORD`) ne sert que pour un ancien certificat ; pour les options ci-dessous il faut une autre étape de signature (voir plus bas). Depuis le 1er mars 2026, la durée de validité d'un certificat est aussi limitée à 460 jours.
 
-En local : `$env:AL_SIGN_ARGS = '/f cert.pfx /p mot_de_passe /tr http://timestamp.digicert.com /td sha256 /fd sha256'`, signer `AudioLinker.exe` avec `signtool sign`, puis `.\installer\build.ps1 -ExePath build\AudioLinker.exe -Sign`.
+Options (état des lieux du 28 octobre 2026, à reconfirmer auprès de chaque fournisseur avant de s'engager) :
 
-Après la publication, soumettre l'installateur et l'exécutable à Microsoft (<https://www.microsoft.com/wdsi/filesubmission>, « Software developer ») pour que la réputation s'établisse plus vite. Si un utilisateur signale une détection, la même page sert à la contester.
+| Option | Pour | À savoir |
+|---|---|---|
+| **SignPath Foundation** (programme gratuit pour l'open source) | Dépôt public et licence MIT : AudioLinker correspond au profil. Signature faite par une GitHub Action sur un build de confiance. | Demande à déposer sur signpath.org et à faire approuver ; authentification à deux facteurs pour tous les contributeurs ; mention « Free code signing provided by SignPath.io, certificate by SignPath Foundation » ; l'éditeur affiché est la fondation, pas vous. |
+| **Azure Artifact Signing** (ex-Trusted Signing) | Signature cloud, environ 10 USD par mois (offre de base), pas de matériel à gérer. | Pour la confiance publique, les **particuliers ne sont acceptés qu'aux États-Unis et au Canada** ; une organisation (société) établie dans l'UE peut l'être, après vérification d'identité. |
+| **Certificat OV / EV d'une autorité** (jeton USB ou signature cloud de l'autorité) | Option classique. | Payant, annuel, jeton ou service cloud selon l'autorité ; la CI doit alors signer via le service cloud de l'autorité, pas avec un `.pfx`. |
+
+Recommandation : demander SignPath Foundation (gratuit, adapté à un projet MIT public), en parallèle d'une réflexion sur la structure juridique si une signature à votre nom est un jour nécessaire. Une fois le compte approuvé, l'intégration remplace l'étape « Prepare code signing » : l'action `signpath/github-action-submit-signing-request` signe d'abord `AudioLinker.exe`, puis l'installateur construit avec cet exécutable, en deux demandes de signature.
+
+En local, avec un certificat accessible à `signtool` : `$env:AL_SIGN_ARGS = '<arguments de signtool>'`, signer `AudioLinker.exe`, puis `.\installer\build.ps1 -ExePath build\AudioLinker.exe -Sign`.
+
+### Soumission à Microsoft (faux positif Defender / réputation SmartScreen)
+
+Une fois la release publiée, déposer l'installateur et l'exécutable sur <https://www.microsoft.com/wdsi/filesubmission> (compte Microsoft requis, profil « Software developer »), et utiliser la même page si un utilisateur signale une détection. Texte à coller :
+
+> AudioLinker 1.2.0 is an open-source (MIT) Windows audio utility that plays the system sound on several output devices at once. Source code: https://github.com/Crazyshouby/AudioLinker. The installer is built by GitHub Actions from the tagged source. The only persistence it creates is an optional "Run at Windows startup" entry in HKCU\Software\Microsoft\Windows\CurrentVersion\Run, which the user enables explicitly (installer task or application option) and which the uninstaller removes. It does not connect to the network except to download the Microsoft WebView2 runtime from Microsoft's own fwlink during installation. Detection name, if any: <à compléter>. Please review and remove the false positive.
 
 ## 5. Après la publication
 
