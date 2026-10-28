@@ -14,6 +14,12 @@ void Write(const wchar_t* level, const std::wstring& msg);
 std::wstring Hr(long hr); // "0x88890004" + known-name when recognized
 }
 
+// Optional observer of every line written, called on the writing thread with
+// the log mutex held (keep it short and never call back into the log). The
+// GUI uses it to feed the Journal window; pass nullptr to remove it.
+using LogSink = void (*)(const wchar_t* level, const std::wstring& msg);
+void SetLogSink(LogSink sink);
+
 // Opens (creates) the log file and records a session banner. Safe to call
 // more than once. Call once at startup.
 void LogInit();

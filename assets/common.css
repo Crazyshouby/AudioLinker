@@ -5,7 +5,8 @@
    page's own <style>.
 
    Design: a dark, flat-grey "windows on a red wallpaper" look after KDX
-   (Haxial). Values come from KDX's own default appearance (lossless
+   (Haxial): every function is its own borderless window with the frame and
+   title bar drawn here (see Panels.cpp for the native side). Values come from KDX's own default appearance (lossless
    screenshots of the KDX documentation, plus the Charcoal .hap): panel
    #333333, buttons #333333 with a #666/#444 top highlight and #222/#111/#000
    bottom shade, window frame #555/#222/#111 around a #000 outline (focused
@@ -18,7 +19,6 @@
    AppState.cpp, the switcher palette in Switcher.cpp): keep them in sync. */
 
 /*@fonts.css@*/
-/*@lava.css@*/
 
 :root {
   --frame: #222222;
@@ -65,7 +65,7 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
 body {
-  background: var(--frame) var(--lava) center / cover;
+  background: var(--frame);
   color: var(--text);
   font: 700 12px/1.35 "Archivo", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   font-stretch: 118%;
@@ -146,3 +146,41 @@ input[type="range"]:focus-visible { outline: 2px solid var(--warn); outline-offs
 .toast.show { opacity: 1; transform: none; }
 .toast-text { min-width: 0; }
 .toast .toast-action { flex: none; padding: 3px 10px; min-height: 0; }
+
+/* ---------- Windows: frame + title bar + recessed panel ---------- */
+/* Frame = four concentric lines (--ring); the title bar runs over it, full
+   width. The window Windows has activated is the red one (body.active, set
+   by the native side). Rolled up (body.shaded): only the title bar shows. */
+.win {
+  position: relative; background: var(--frame); border: 1px solid #000; box-shadow: var(--ring);
+  display: flex; flex-direction: column; min-width: 0; padding: 0 5px 5px;
+}
+html[data-panel]:not([data-panel="all"]) .win { position: fixed; inset: 0; }
+.tb {
+  flex: none; height: 21px; margin: 0 -5px 4px; display: flex; align-items: center; justify-content: center;
+  background: var(--title); border-bottom: 1px solid #000; color: var(--text); position: relative;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 28px; text-shadow: 0 1px 0 #000;
+}
+.tb-title { pointer-events: none; overflow: hidden; text-overflow: ellipsis; }
+.tb-btn {
+  position: absolute; top: 3px; width: 15px; height: 15px; padding: 0; display: grid; place-items: center; cursor: pointer;
+  background: #111; border: 1px solid #000; box-shadow: inset 0 0 0 1px #777;
+}
+.tb-btn:hover { background: #2a2a2a; }
+.tb-btn svg { width: 9px; height: 9px; display: block; }
+.tb-l { left: 4px; }
+.tb-r { right: 4px; }
+.cb { flex: 1; min-height: 0; padding: 8px; background: var(--panel); display: flex; flex-direction: column; }
+/* Resize grip: diagonal stripes, bottom right (KDX has no other way to resize). */
+.grip-rz {
+  position: absolute; right: 5px; bottom: 5px; width: 15px; height: 15px; cursor: nwse-resize; z-index: 5;
+  background: repeating-linear-gradient(135deg, transparent 0 3px, #888 3px 4px); border: 1px solid #000;
+  background-color: #222;
+}
+body.active .win { background: #880000; box-shadow: var(--ring-focus); }
+body.active .tb { background: var(--title-focus); border-bottom-color: #440000; }
+body.active .tb-btn { background: #440000; box-shadow: inset 0 0 0 1px #cc0000; }
+body.active .tb-btn:hover { background: #660000; }
+body.active .grip-rz { background-color: #440000; background-image: repeating-linear-gradient(135deg, transparent 0 3px, #cc0000 3px 4px); }
+body.shaded .cb, body.shaded .grip-rz { display: none !important; } /* !important: the pages show the grip per window */
+body.shaded .tb { margin-bottom: 0; }

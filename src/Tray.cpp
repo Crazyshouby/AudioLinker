@@ -143,19 +143,14 @@ void ShowTrayMenu(HWND hwnd) {
     DestroyMenu(menu);
 }
 
-void RestoreFromTray(HWND hwnd) {
-    ShowWindow(hwnd, SW_SHOW);
-    ShowWindow(hwnd, SW_RESTORE);
-    SetForegroundWindow(hwnd);
-    ResumeMainWebView();
-    // Everything that changed while the window was hidden (setup switched by
-    // hotkey, device hot-plugs...) was not posted to the page -- see
+void RestoreFromTray(HWND /*hwnd*/) {
+    ShowLauncherFromTray(); // the launcher, then the windows that were open
+    // Everything that changed while the windows were hidden (setup switched
+    // by hotkey, device hot-plugs...) was not posted to any page -- see
     // PostJson -- so re-sync it now that someone can see it again, then
-    // replay the toasts it missed.
+    // replay the toasts they missed.
     SendState();
-    if (g_webview) {
-        for (const auto& j : g_pendingJson) g_webview->PostWebMessageAsJson(j.c_str());
-    }
+    for (const auto& j : g_pendingJson) PostToastTarget(j);
     g_pendingJson.clear();
 }
 

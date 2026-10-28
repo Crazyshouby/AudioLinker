@@ -175,25 +175,12 @@ UINT g_showAppMessage = 0;
 
 
 HBRUSH g_hBrushWindowBg = nullptr;
-HBRUSH g_optionsHBrushWindowBg = nullptr; // the Options window class's own background brush
 HICON g_hAppIcon = nullptr;
 NOTIFYICONDATAW g_trayIcon = {};
 
-ComPtr<ICoreWebView2Controller> g_webviewController;
-ComPtr<ICoreWebView2> g_webview;
-EventRegistrationToken g_webMessageToken = {};
-// Shared with the Options window's controller (see OpenOptionsWindow) --
-// environments are meant to be reused across controllers/windows instead of
-// creating a new one per top-level window.
+// Shared by every window's controller (see Panels.cpp) -- environments are
+// meant to be reused across controllers instead of one per top-level window.
 ComPtr<ICoreWebView2Environment> g_webviewEnvironment;
-
-// Options: a real, separate, modal top-level window (see OpenOptionsWindow),
-// not an in-page overlay -- movable/resizable independently of the main
-// window, with its own WebView2 controller hosting options.html.
-HWND g_optionsWnd = nullptr;
-ComPtr<ICoreWebView2Controller> g_optionsController;
-ComPtr<ICoreWebView2> g_optionsWebview;
-EventRegistrationToken g_optionsMessageToken = {};
 
 // Re-syncs everything driven by the native side's own rendering (the WebView2
 // host background, the DWM title bar, and later the switcher popup's GDI

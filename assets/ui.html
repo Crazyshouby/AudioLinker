@@ -5,25 +5,7 @@
 <title>AudioLinker</title>
 <style>
 /*@common.css@*/
-#app { display: flex; flex-direction: column; height: 100%; padding: 14px 16px 10px; gap: 12px; }
-
-/* ---------- Windows: frame + title bar + recessed panel ---------- */
-/* Frame = four concentric lines (--ring); the title bar runs over it, full
-   width. The window that holds the focus is red (see setFocusWin()). */
-.win {
-  background: var(--frame); border: 1px solid #000; box-shadow: var(--ring), 4px 5px 0 rgba(0, 0, 0, 0.5);
-  display: flex; flex-direction: column; min-width: 0; padding: 0 5px 5px;
-}
-.tb {
-  flex: none; height: 21px; margin: 0 -5px 4px; display: flex; align-items: center; justify-content: center;
-  background: var(--title); border-bottom: 1px solid #000; color: var(--text); position: relative;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 28px; text-shadow: 0 1px 0 #000;
-}
-.cb {
-  flex: 1; min-height: 0; padding: 8px; background: var(--panel); display: flex; flex-direction: column;
-}
-.win.focus { background: #880000; box-shadow: var(--ring-focus), 4px 5px 0 rgba(0, 0, 0, 0.5); }
-.win.focus .tb { background: var(--title-focus); border-bottom-color: #440000; }
+#app { height: 100%; }
 
 /* Scroll bars: dark track, bevelled thumb, small arrow buttons. */
 ::-webkit-scrollbar { width: 11px; height: 11px; }
@@ -47,10 +29,6 @@
 .orb.amber { background: radial-gradient(circle at 35% 30%, #ffe090, #faa320 55%, #b05a00); }
 
 /* ---------- Header ---------- */
-header.win { flex: none; }
-.head-row { flex-direction: row; align-items: center; gap: 10px; padding: 6px 8px; }
-.logo { flex: none; }
-.brand { flex: 1; min-width: 0; }
 /* Status readout: a black console strip with a red frame. */
 .status {
   display: flex; align-items: center; gap: 8px; min-width: 0; background: var(--ink);
@@ -107,12 +85,9 @@ header.win { flex: none; }
 /* ---------- Layout ---------- */
 /* Two-column landscape layout: setups on the left, the (growable) speaker
    list -- with the selected speaker's sheet opened in place -- on the right. */
-main { flex: 1; display: flex; flex-direction: row; gap: 12px; min-height: 0; }
-#colLeft { width: 340px; flex: none; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
 .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 
 /* ---------- Device list ---------- */
-#devicesCard { flex: 1; min-width: 0; min-height: 150px; }
 #devicesCard > .cb { gap: 8px; }
 .list { flex: 1; min-height: 0; overflow-y: auto; background: var(--panel); border: 1px solid #000; box-shadow: 0 1px 0 #555; }
 #devicesToolbar { flex: none; flex-wrap: nowrap; }
@@ -320,7 +295,6 @@ main { flex: 1; display: flex; flex-direction: row; gap: 12px; min-height: 0; }
 .sheet-hint { font-size: 11px; font-weight: 600; color: var(--faint); margin-top: 2px; }
 
 /* ---------- Setups ---------- */
-#setupsCard { flex: 1; min-height: 150px; }
 #setupsCard > .cb { gap: 8px; }
 .setup {
   position: relative; /* anchors the delete button, which must not take row width */
@@ -386,51 +360,105 @@ select.text-input {
 .cal-row.failed .cal-status { color: var(--red); }
 #calResults { margin-bottom: 4px; }
 
-/* ---------- Footer ---------- */
+/* ---------- Footer (shortcut hints, bottom of the Setups window) ---------- */
 footer {
-  flex: none; text-align: center; background: var(--ink); border: 2px solid var(--red-frame);
-  color: var(--green); padding: 4px 8px; font: 600 11px "Overpass Mono", Consolas, monospace; font-stretch: 100%;
+  flex: none; text-align: left; background: var(--ink); border: 2px solid var(--red-frame);
+  color: var(--green); padding: 4px 8px; font: 600 10.5px/1.5 "Overpass Mono", Consolas, monospace; font-stretch: 100%;
 }
 footer:empty { display: none; }
-footer kbd { background: var(--btn); border: 1px solid var(--lo); border-top-color: var(--hi); padding: 0 5px; font-size: 10.5px; color: var(--text); }
+footer kbd { background: var(--btn); border: 1px solid #000; box-shadow: var(--bevel); padding: 0 4px; font-size: 10px; color: var(--text); }
+
+/* ---------- Which window this page shows ---------- */
+.win { display: none; }
+html[data-panel="launcher"] #launcherWin,
+html[data-panel="outputs"] #devicesCard,
+html[data-panel="setups"] #setupsCard,
+html[data-panel="levels"] #levelsWin,
+html[data-panel="journal"] #journalWin,
+html[data-panel="all"] .win { display: flex; }
+/* Plain browser (tests): all windows side by side. */
+html[data-panel="all"] body { overflow: auto; }
+html[data-panel="all"] #app { display: flex; flex-wrap: wrap; gap: 14px; padding: 14px; height: auto; align-items: flex-start; }
+html[data-panel="all"] .win { width: 560px; height: 560px; }
+html[data-panel="all"] #launcherWin { width: 224px; height: 520px; }
+.grip-rz { display: none; }
+html[data-panel="outputs"] .grip-rz, html[data-panel="setups"] .grip-rz, html[data-panel="levels"] .grip-rz,
+html[data-panel="journal"] .grip-rz, html[data-panel="all"] #devicesCard .grip-rz { display: block; }
+
+/* ---------- Launcher: the narrow button column of the main window ---------- */
+.launcher { background: #2a2a2a; gap: 6px; padding: 6px; }
+.launcher .status { padding: 5px 7px; font-size: 11px; }
+.launcher .status > span:last-child { white-space: normal; overflow: visible; }
+.lbtns { display: flex; flex-direction: column; gap: 1px; }
+.lbtn {
+  position: relative; display: flex; align-items: center; gap: 8px; height: 24px; padding: 0 8px; text-align: left;
+  font: inherit; font-weight: 700; color: var(--text); cursor: pointer; white-space: nowrap;
+  background: var(--btn); border: 1px solid #000; border-radius: 3px; box-shadow: var(--bevel);
+}
+.lbtn:hover { background: #3b3b3b; }
+.lbtn:focus-visible { outline: 2px solid var(--warn); outline-offset: 1px; }
+.lbtn.on, .lbtn:active { background: #2a2a2a; box-shadow: var(--bevel-down); }
+.lbtn .orb { position: absolute; right: 8px; top: 6px; }
+.lbtn .orb[hidden] { display: none; }
+.lsel {
+  width: 100%; height: 24px; padding: 0 6px; font: inherit; font-weight: 700; color: var(--text); cursor: pointer;
+  background: var(--btn); border: 1px solid #000; border-radius: 3px; box-shadow: var(--bevel);
+}
+.lsel option { background: #2a2a2a; color: #fff; }
+.lsel:disabled { color: #7a7a7a; }
+.launcher #toggleBtn { width: calc(100% - 8px); margin: 6px 4px; min-width: 0; }
+.counters { display: flex; justify-content: space-between; padding: 0 6px; margin-top: auto; color: var(--muted); font-size: 11px; }
+.launcher #banner { font-size: 11px; padding: 5px 7px; flex-wrap: wrap; }
+
+/* ---------- Levels window (cf. KDX File Transfers) ---------- */
+.lvl { display: flex; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); align-items: flex-start; }
+.lvl-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.lvl-name { display: flex; align-items: center; gap: 6px; font-size: 12.5px; min-width: 0; }
+.lvl-name span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lvl-stat { font: 600 11px "Overpass Mono", Consolas, monospace; font-stretch: 100%; color: var(--green); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lvl.off .lvl-stat { color: var(--faint); }
+.lvl .vu { flex: none; }
+
+/* ---------- Journal window (cf. KDX News) ---------- */
+.journal { background: var(--ink); }
+.jr-h { background: #3a3a3a; color: var(--text); padding: 3px 7px; font: 600 11px/1.4 "Overpass Mono", Consolas, monospace; font-stretch: 100%; }
+.jr-b { background: var(--ink); color: #00ff00; padding: 5px 7px; font: 600 12px/1.4 "Overpass Mono", Consolas, monospace; font-stretch: 100%; white-space: pre-wrap; word-break: break-word; }
+.jr.warn .jr-b { color: var(--warn); }
+.jr.err .jr-b { color: var(--red); }
+.jr-tools { display: flex; gap: 8px; flex: none; margin-top: 8px; }
 </style>
 </head>
 <body>
 <div id="app">
-  <header class="win">
-    <div class="tb">AudioLinker</div>
-    <div class="cb head-row">
-      <span class="pix logo" data-ic="enceinte" data-size="32"></span>
-      <div class="brand">
-        <div class="status" id="statusPill"><span class="dot"></span><span id="statusText">Groupe arrêté</span></div>
+
+  <!-- The launcher: the main window, a column of buttons like KDX's. -->
+  <section class="win" id="launcherWin">
+    <div class="tb"><span class="tb-title">AudioLinker</span><button class="tb-btn tb-r" data-act="close" data-glyph="minus" title="Réduire dans la zone de notification" aria-label="Réduire dans la zone de notification"></button></div>
+    <div class="cb launcher">
+      <div class="status" id="statusPill"><span class="dot"></span><span id="statusText">Groupe arrêté</span></div>
+      <div id="banner" hidden><span class="banner-text" id="bannerText"></span><button class="ghost-btn" id="bannerBtn" hidden></button></div>
+      <select id="setupSelect" class="lsel" title="Setup chargé : le choisir le charge sans le jouer" aria-label="Setup chargé"></select>
+      <div class="lbtns">
+        <button class="lbtn" data-open="outputs"><span class="pix" data-ic="enceinte"></span>Sorties</button>
+        <button class="lbtn" id="inputsBtn"><span class="pix" data-ic="micro"></span>Entrées</button>
+        <button class="lbtn" data-open="setups"><span class="pix" data-ic="setups"></span>Setups</button>
+        <button class="lbtn" data-open="levels"><span class="pix" data-ic="volume"></span>Niveaux</button>
+        <button class="lbtn" data-open="journal"><span class="pix" data-ic="journal"></span>Journal<span class="orb amber" id="journalOrb" hidden></span></button>
       </div>
-      <button class="icon-btn" id="muteBtn" title="Couper le son de tout le groupe (sans toucher aux réglages)">
-        <span class="pix" id="muteIcon" data-ic="volume"></span>
-      </button>
-      <button class="icon-btn" id="optionsBtn" title="Options"><span class="pix" data-ic="options"></span></button>
       <button id="toggleBtn"><span class="spin"></span><span id="toggleLabel">Démarrer le groupe</span></button>
-    </div>
-  </header>
-
-  <div id="banner" hidden><span class="banner-text" id="bannerText"></span><button class="ghost-btn" id="bannerBtn" hidden></button></div>
-
-  <main>
-    <div id="colLeft">
-    <section class="win" id="setupsCard">
-      <div class="tb">Setups</div>
-      <div class="cb">
-        <div class="list" id="setupList"></div>
-        <div class="setup-form">
-          <input type="text" class="text-input" id="setupName" maxlength="60" spellcheck="false"
-                 placeholder="Nom du setup…">
-          <button class="ghost-btn" id="saveSetupBtn">Enregistrer l'actuel</button>
-        </div>
+      <div class="lbtns">
+        <button class="lbtn" id="muteBtn" title="Couper le son de tout le groupe (sans toucher aux réglages)"><span class="pix" id="muteIcon" data-ic="volume"></span><span id="muteLabel">Couper le son</span></button>
+        <button class="lbtn" id="calLaunchBtn" title="Mesurer la latence de chaque enceinte avec un micro et les aligner"><span class="pix" data-ic="egaliseur"></span>Calage micro</button>
+        <button class="lbtn" id="optionsBtn"><span class="pix" data-ic="options"></span>Options</button>
+        <button class="lbtn" id="aboutBtn">À propos</button>
+        <button class="lbtn" id="quitBtn" title="Arrête le groupe et ferme AudioLinker">Quitter</button>
       </div>
-    </section>
+      <div class="counters mono"><span id="cntOut" title="Enceintes cochées">[0]</span><span id="cntSetups" title="Setups enregistrés">[0]</span><span id="cntGlitch" title="Craquements depuis le démarrage">[0]</span></div>
     </div>
+  </section>
 
     <section class="win" id="devicesCard">
-      <div class="tb">Enceintes</div>
+      <div class="tb"><button class="tb-btn tb-l" data-act="close" data-glyph="x" title="Fermer" aria-label="Fermer"></button><span class="tb-title">Enceintes</span><button class="tb-btn tb-r" data-act="shade" data-glyph="minus" title="Enrouler" aria-label="Enrouler"></button></div>
       <div class="cb">
       <div class="card-head">
         <div class="seg-tabs" id="devTabs">
@@ -457,10 +485,43 @@ footer kbd { background: var(--btn); border: 1px solid var(--lo); border-top-col
         immédiatement et à chaque application de ce setup. Aucun micro coché&nbsp;: le setup ne touche
         pas au micro.</div>
       </div>
+      <div class="grip-rz"></div>
     </section>
-  </main>
 
-  <footer id="footerHint"></footer>
+    <section class="win" id="setupsCard">
+      <div class="tb"><button class="tb-btn tb-l" data-act="close" data-glyph="x" title="Fermer" aria-label="Fermer"></button><span class="tb-title">Setups</span><button class="tb-btn tb-r" data-act="shade" data-glyph="minus" title="Enrouler" aria-label="Enrouler"></button></div>
+      <div class="cb">
+        <div class="list" id="setupList"></div>
+        <div class="setup-form">
+          <input type="text" class="text-input" id="setupName" maxlength="60" spellcheck="false"
+                 placeholder="Nom du setup…">
+          <button class="ghost-btn" id="saveSetupBtn">Enregistrer l'actuel</button>
+        </div>
+        <footer id="footerHint"></footer>
+      </div>
+      <div class="grip-rz"></div>
+    </section>
+
+  <section class="win" id="levelsWin">
+    <div class="tb"><button class="tb-btn tb-l" data-act="close" data-glyph="x" title="Fermer" aria-label="Fermer"></button><span class="tb-title">Niveaux</span><button class="tb-btn tb-r" data-act="shade" data-glyph="minus" title="Enrouler" aria-label="Enrouler"></button></div>
+    <div class="cb">
+      <div class="list" id="levelsList"></div>
+    </div>
+    <div class="grip-rz"></div>
+  </section>
+
+  <section class="win" id="journalWin">
+    <div class="tb"><button class="tb-btn tb-l" data-act="close" data-glyph="x" title="Fermer" aria-label="Fermer"></button><span class="tb-title">Journal</span><button class="tb-btn tb-r" data-act="shade" data-glyph="minus" title="Enrouler" aria-label="Enrouler"></button></div>
+    <div class="cb">
+      <div class="list journal" id="journalList"></div>
+      <div class="jr-tools">
+        <button class="ghost-btn" id="journalClear">Effacer</button>
+        <button class="ghost-btn" id="journalOpen" title="Ouvre le fichier journal de diagnostic dans votre éditeur de texte">Ouvrir le fichier</button>
+      </div>
+    </div>
+    <div class="grip-rz"></div>
+  </section>
+
 </div>
 
 <!-- The selected speaker's sheet: one element, moved under the selected row. -->
@@ -648,6 +709,7 @@ function renderHeader() {
   mute.classList.toggle("on", !!state.groupMuted);
   mute.title = state.groupMuted ? "Rétablir le son du groupe" : "Couper le son de tout le groupe (sans toucher aux réglages)";
   $("#muteIcon").innerHTML = pix(state.groupMuted ? "muet" : "volume");
+  $("#muteLabel").textContent = state.groupMuted ? "Rétablir le son" : "Couper le son";
   // Group stopped: the default device is restored, ticks would blast the
   // normal output instead of the group.
   if (!state.running && typeof calTimer !== "undefined" && calTimer) setCalibration(false);
@@ -1165,6 +1227,7 @@ function selectDevice(id) {
 // Re-sent on every state message too, since a group start recreates the
 // engine's outputs with the flag cleared.
 function announceSpectrumTarget() {
+  if (PANEL !== "outputs" && PANEL !== "all") return; // only the speaker list owns the spectrum target
   post("spectrum|" + (selectedId && !document.hidden ? selectedId : ""));
 }
 
@@ -1418,8 +1481,7 @@ function renderFooter() {
     kbdSeq(el, ["Ctrl", "Maj", "1-9"]);
     el.appendChild(document.createTextNode(" setup direct"));
   }
-  el.appendChild(document.createTextNode(
-    " · clic sur une enceinte : sa fiche · double-clic sur le nom : renommer · clic droit : plus. Fermer range AudioLinker près de l'horloge."));
+
 }
 
 // ---------- Banner (persistent notice under the header) ----------
@@ -1448,8 +1510,8 @@ function renderBanner() {
 // makes a click look like it did nothing.
 function renderAll() {
   if (selectedId && !device(selectedId)) selectedId = null;
-  for (const fn of [renderHeader, renderList, renderInputs, renderSheet, renderSetups,
-                    renderMasterVolume, renderFooter, renderBanner, announceSpectrumTarget]) {
+  for (const fn of [renderHeader, renderLauncher, renderList, renderInputs, renderSheet, renderSetups,
+                    renderLevels, renderMasterVolume, renderFooter, renderBanner, announceSpectrumTarget]) {
     try { fn(); } catch (e) { console.error("render failed in " + fn.name + ":", e); }
   }
 }
@@ -1639,6 +1701,17 @@ const lostIds = new Set();
 // retrying): they play silence but the rest of the group keeps going.
 const lostSourceIds = new Set();
 
+// The toast goes to the same window the native side picks for its own toasts
+// (see PostToastTarget): the first open one of this list.
+const TOAST_ORDER = ["outputs", "setups", "journal", "levels", "options", "launcher"];
+function isToaster() {
+  if (!PANEL || PANEL === "all") return true;
+  const open = state.panels || {};
+  for (const k of TOAST_ORDER) if (open[k]) return k === PANEL;
+  return PANEL === "launcher";
+}
+function toastOnce(...args) { if (isToaster()) toast(...args); }
+
 function applyStatus(m) {
   const headerDirty = (m.running !== state.running) || (m.starting !== state.starting);
   state.running = m.running;
@@ -1652,17 +1725,17 @@ function applyStatus(m) {
       const d = device(id);
       if (r.wasActive === true && !st.active) {
         lostIds.add(id);
-        if (d) toast(`${displayName(d)} : sortie perdue — reconnexion en cours…`);
+        if (d) toastOnce(`${displayName(d)} : sortie perdue — reconnexion en cours…`);
       } else if (st.active && lostIds.has(id)) {
         lostIds.delete(id);
-        if (d) toast(`${displayName(d)} : reconnectée`, "ok");
+        if (d) toastOnce(`${displayName(d)} : reconnectée`, "ok");
       }
       if (st.sourceLost && !lostSourceIds.has(id)) {
         lostSourceIds.add(id);
-        if (d) toast(`${displayName(d)} : source fermée — sortie en silence`);
+        if (d) toastOnce(`${displayName(d)} : source fermée — sortie en silence`);
       } else if (!st.sourceLost && lostSourceIds.has(id)) {
         lostSourceIds.delete(id);
-        if (d) toast(`${displayName(d)} : source rétablie`, "ok");
+        if (d) toastOnce(`${displayName(d)} : source rétablie`, "ok");
       }
       if (st.sourceLost && d) lostNames.push(displayName(d));
       r.wasActive = st.active;
@@ -1692,6 +1765,10 @@ function applyStatus(m) {
       r.lag.hidden = true;
     }
   }
+  let glitchTotal = 0;
+  for (const o of (m.outputs || [])) glitchTotal += (o.underruns || 0) + (o.drift || 0);
+  $("#cntGlitch").textContent = `[${m.running ? glitchTotal : 0}]`;
+  updateLevelStatus(m);
   statusBanner = lostNames.length
     ? `Source perdue pour ${lostNames.join(", ")} : lecture en silence jusqu'au retour de la source.`
     : "";
@@ -1702,6 +1779,12 @@ function applyStatus(m) {
 // ---------- Level meters ("peaks": every 100ms) ----------
 
 function applyPeaks(m) {
+  for (const [id, r] of levelRefs) {
+    const p = m.outputs && m.outputs.find(o => o.id === id);
+    const peak = p && state.running ? p.peak : 0;
+    r.fill.style.width = (Math.sqrt(Math.min(1, Math.max(0, peak))) * 100).toFixed(1) + "%";
+    r.fill.classList.toggle("hot", peak > 0.85);
+  }
   for (const [id, r] of rowRefs) {
     const p = m.outputs && m.outputs.find(o => o.id === id);
     const peak = p && state.running ? p.peak : 0;
@@ -1861,7 +1944,7 @@ function applyCal(m) {
   renderCalRows(m);
   // The pass keeps running if the modal was closed mid-way: reopen so the
   // progress (and the cancel button) can't get lost.
-  if (m.running && !$("#calModal").classList.contains("show")) openModal("#calModal");
+  if (m.running && (PANEL === "outputs" || PANEL === "all") && !$("#calModal").classList.contains("show")) openModal("#calModal");
 }
 
 $("#micCalBtn").addEventListener("click", openCalModal);
@@ -1967,16 +2050,196 @@ for (const m of document.querySelectorAll(".modal")) {
   m.addEventListener("mousedown", ev => { if (ev.target === m) closeModal("#" + m.id); });
 }
 
+// ---------- Launcher (the main window: setup picker, window buttons, counters) ----------
+
+let journalUnread = 0; // warnings/errors that arrived while the Journal window was closed
+
+function renderLauncher() {
+  const open = state.panels || {};
+  for (const b of document.querySelectorAll("[data-open]")) b.classList.toggle("on", !!open[b.dataset.open]);
+  $("#optionsBtn").classList.toggle("on", !!open.options);
+  const sel = $("#setupSelect");
+  const names = state.setups.map(s => s.name);
+  const cur = state.editingSetup || state.activeSetup || "";
+  sel.textContent = "";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = names.length ? "(aucun setup chargé)" : "(aucun setup)";
+  sel.appendChild(none);
+  for (const n of names) {
+    const o = document.createElement("option");
+    o.value = n;
+    o.textContent = n;
+    sel.appendChild(o);
+  }
+  sel.value = names.includes(cur) ? cur : "";
+  sel.disabled = !names.length;
+  $("#cntOut").textContent = `[${state.devices.filter(d => d.checked).length}]`;
+  $("#cntSetups").textContent = `[${names.length}]`;
+  if (open.journal) journalUnread = 0;
+  $("#journalOrb").hidden = !journalUnread;
+}
+
+$("#setupSelect").addEventListener("change", () => {
+  const v = $("#setupSelect").value;
+  if (v) post("setup_select|" + v);
+});
+for (const b of document.querySelectorAll("[data-open]")) {
+  b.addEventListener("click", () => post(`panel|${b.dataset.open}|toggle`));
+}
+// The speaker list opens (if needed) and then does the asked thing: switch to
+// the inputs tab, open the mic calibration.
+$("#inputsBtn").addEventListener("click", () =>
+  post('panel|outputs|open|{"type":"uicmd","cmd":"tab","value":"inputs"}'));
+$("#calLaunchBtn").addEventListener("click", () =>
+  post('panel|outputs|open|{"type":"uicmd","cmd":"calmodal"}'));
+$("#aboutBtn").addEventListener("click", () =>
+  toast(`AudioLinker ${state.version || ""} — groupe d'enceintes multi-sorties`, "ok"));
+$("#quitBtn").addEventListener("click", () => post("quit"));
+
+function applyUiCommand(m) {
+  if (PANEL !== "outputs" && PANEL !== "all") return;
+  if (m.cmd === "tab") {
+    const btn = document.querySelector(`.seg-tab[data-tab="${m.value}"]`);
+    if (btn) btn.click();
+  } else if (m.cmd === "calmodal") {
+    openCalModal();
+  }
+}
+
+// ---------- Levels window ----------
+
+const KIND_PIX = { speaker: "enceinte", headphones: "casque", hdmi: "ecran", digital: "cable", bluetooth: "bluetooth" };
+const levelRefs = new Map(); // deviceId -> {row, orb, fill, stat}
+
+function levelText(d, st) {
+  if (!state.running) return "Groupe arrêté";
+  if (st && st.sourceLost) return "Source perdue : silence";
+  if (st && !st.active) return "Reconnexion…";
+  const bits = [`${d.volume} %`, `${d.latency} ms`];
+  if (d.muted) bits.push("muet");
+  return "Lecture. " + bits.join(", ");
+}
+
+function renderLevels() {
+  const list = $("#levelsList");
+  list.textContent = "";
+  levelRefs.clear();
+  const outs = state.devices.filter(d => d.checked);
+  if (!outs.length) {
+    const e = document.createElement("div");
+    e.className = "empty";
+    e.textContent = "Aucune enceinte cochée.";
+    list.appendChild(e);
+    return;
+  }
+  for (const d of outs) {
+    const row = document.createElement("div");
+    row.className = "lvl" + (state.running ? "" : " off");
+    const ico = document.createElement("span");
+    ico.className = "pix";
+    ico.innerHTML = pix(KIND_PIX[d.kind] || "enceinte", 24);
+    const main = document.createElement("div");
+    main.className = "lvl-main";
+    const nameRow = document.createElement("div");
+    nameRow.className = "lvl-name";
+    const orb = document.createElement("span");
+    orb.className = "orb";
+    const nm = document.createElement("span");
+    nm.textContent = displayName(d);
+    nm.title = d.name;
+    nameRow.append(orb, nm);
+    const vu = document.createElement("div");
+    vu.className = "vu";
+    const fill = document.createElement("div");
+    fill.className = "vu-fill";
+    vu.appendChild(fill);
+    const stat = document.createElement("div");
+    stat.className = "lvl-stat";
+    stat.textContent = levelText(d, null);
+    main.append(nameRow, vu, stat);
+    row.append(ico, main);
+    list.appendChild(row);
+    levelRefs.set(d.id, { row, orb, fill, stat });
+  }
+}
+
+function updateLevelStatus(m) {
+  for (const [id, r] of levelRefs) {
+    const d = device(id);
+    const st = m.outputs && m.outputs.find(o => o.id === id);
+    const live = !!(m.running && st && st.active);
+    r.orb.classList.toggle("green", live);
+    r.row.classList.toggle("off", !m.running);
+    if (d) r.stat.textContent = levelText(d, m.running ? st : null);
+    if (!m.running) r.fill.style.width = "0%";
+  }
+}
+
+// ---------- Journal window ----------
+
+const JOURNAL_MAX = 300;
+const DAYS = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
+const MONTHS = ["Janv", "Févr", "Mars", "Avr", "Mai", "Juin", "Juil", "Août", "Sept", "Oct", "Nov", "Déc"];
+
+function fmtJournalTime(ts) {
+  const d = new Date(ts), p = n => String(n).padStart(2, "0");
+  return `${DAYS[d.getDay()]}. ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ` +
+         `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function journalEntryEl(e) {
+  const wrap = document.createElement("div");
+  wrap.className = "jr" + (e.level === 1 ? " warn" : e.level >= 2 ? " err" : "");
+  const h = document.createElement("div");
+  h.className = "jr-h";
+  h.textContent = `${e.level >= 2 ? "Erreur" : e.level === 1 ? "Avertissement" : "Info"} — ${fmtJournalTime(e.ts)}`;
+  const b = document.createElement("div");
+  b.className = "jr-b";
+  b.textContent = e.text;
+  wrap.append(h, b);
+  return wrap;
+}
+
+function renderJournal(entries) {
+  const list = $("#journalList");
+  list.textContent = "";
+  for (const e of entries.slice(-JOURNAL_MAX)) list.appendChild(journalEntryEl(e));
+  list.scrollTop = list.scrollHeight;
+}
+
+function addJournal(e) {
+  const list = $("#journalList");
+  const atEnd = list.scrollHeight - list.scrollTop - list.clientHeight < 30;
+  list.appendChild(journalEntryEl(e));
+  while (list.children.length > JOURNAL_MAX) list.firstChild.remove();
+  if (atEnd) list.scrollTop = list.scrollHeight;
+  if (e.level >= 1 && !(state.panels || {}).journal) {
+    journalUnread++;
+    $("#journalOrb").hidden = false;
+  }
+}
+
+$("#journalClear").addEventListener("click", () => post("journalclear"));
+$("#journalOpen").addEventListener("click", () => post("openlog"));
+
 // ---------- Bridge ----------
 
 if (bridge) {
   bridge.addEventListener("message", ev => {
     const m = ev.data;
     if (!m || !m.type) return;
-    if (m.type === "state") {
+    if (chromeMessage(m)) return;
+    if (m.type === "journal") {
+      renderJournal(m.entries || []);
+    } else if (m.type === "journalAdd") {
+      addJournal(m.entry);
+    } else if (m.type === "uicmd") {
+      applyUiCommand(m);
+    } else if (m.type === "state") {
       state = m;
       renderAll();
-      if (!sourcesRequested) requestSources(); // once, so the ♪ badges have names
+      if (!sourcesRequested && (PANEL === "outputs" || PANEL === "all")) requestSources(); // once, so the ♪ badges have names
     } else if (m.type === "status") {
       applyStatus(m);
     } else if (m.type === "peaks") {
@@ -2000,17 +2263,6 @@ if (bridge) {
   post("ready");
 }
 
-// The window holding the focus is the red one (KDX: only the active window
-// has the red frame and title bar). Clicking or tabbing into a window
-// makes it the active one.
-function setFocusWin(win) {
-  for (const w of document.querySelectorAll(".win")) w.classList.toggle("focus", w === win);
-}
-for (const w of document.querySelectorAll(".win")) {
-  w.addEventListener("mousedown", () => setFocusWin(w));
-  w.addEventListener("focusin", () => setFocusWin(w));
-}
-setFocusWin(document.getElementById("devicesCard"));
 </script>
 </body>
 </html>

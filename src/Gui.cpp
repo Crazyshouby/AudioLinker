@@ -1,43 +1,14 @@
-// Main window: theme application, WebView2 bootstrap and background
-// footprint, window placement, the window procedure, and RunApplication.
+// The launcher window (the app's main window) procedure, the pieces both page
+// hosts share (HTML resources, WebView2 hardening), window placement and
+// RunApplication. The other windows live in Panels.cpp.
 
 #include "App.h"
 #include "Gui.h"
 
 namespace al {
 
-void ApplyWindowTheme(HWND hwnd) {
-    bool light = EffectiveLightTheme();
-    g_windowBg = WindowBgForTheme(light);
-
-    HBRUSH newBrush = CreateSolidBrush(g_windowBg);
-    SetClassLongPtrW(hwnd, GCLP_HBRBACKGROUND, reinterpret_cast<LONG_PTR>(newBrush));
-    if (g_hBrushWindowBg) DeleteObject(g_hBrushWindowBg);
-    g_hBrushWindowBg = newBrush;
-
-    BOOL darkMode = light ? FALSE : TRUE;
-    DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &darkMode, sizeof(darkMode));
-
-    if (g_webviewController) {
-        ComPtr<ICoreWebView2Controller2> controller2;
-        if (SUCCEEDED(g_webviewController->QueryInterface(IID_PPV_ARGS(controller2.GetAddressOf())))) {
-            COREWEBVIEW2_COLOR bg = { 255, GetRValue(g_windowBg), GetGValue(g_windowBg), GetBValue(g_windowBg) };
-            controller2->put_DefaultBackgroundColor(bg);
-        }
-    }
-    InvalidateRect(hwnd, nullptr, TRUE);
-}
-
-// Same idea as ApplyWindowTheme but for the Options window's own class brush
-// (a separate window class, so it needs its own brush tracked separately --
-// see g_optionsHBrushWindowBg). No-op if the window isn't currently open.
-// Call ApplyWindowTheme(g_mainWnd) first: this reuses the g_windowBg it just
-// recomputed instead of recomputing it a second time.
-
-// --- WebView2 bootstrap ---
-
-// Both UI pages (ui.html, options.html) are embedded as RCDATA resources
-// (UTF-8) so the exe stays self-contained — no loose .html files to ship or
+// The UI pages (ui.html, options.html) are embedded as RCDATA resources
+// (UTF-8) so the exe stays self-contained -- no loose .html files to ship or
 // tamper with.
 std::wstring LoadHtmlResource(int resId) {
     HMODULE mod = GetModuleHandleW(nullptr);
@@ -52,15 +23,6 @@ std::wstring LoadHtmlResource(int resId) {
     std::wstring html(wlen, L'\0');
     MultiByteToWideChar(CP_UTF8, 0, bytes, static_cast<int>(size), html.data(), wlen);
     return html;
-}
-
-void WebViewFatalError(HWND hwnd) {
-    MessageBoxW(hwnd,
-        L"Impossible d'initialiser WebView2.\n\n"
-        L"Le runtime « Microsoft Edge WebView2 » est requis (préinstallé sur "
-        L"Windows 11, téléchargeable depuis le site de Microsoft sinon).",
-        L"AudioLinker", MB_ICONERROR);
-    DestroyWindow(hwnd);
 }
 
 // The pages are fully embedded (NavigateToString) and contain no external
@@ -103,129 +65,6 @@ void HardenWebView(ICoreWebView2* webview) {
             }).Get(), &token);
 }
 
-void OnWebViewControllerReady(HWND hwnd, ICoreWebView2Controller* controller) {
-    g_webviewController = controller;
-    // Explicitly sync WebView2's own visibility flag to the host window's
-    // current state instead of relying on it to follow the HWND on its own:
-    // a controller created against a window that has never been shown yet
-    // (--tray autostart at Windows login) can otherwise end up with a blank
-    // surface the first time the window is actually shown. Kept in sync on
-    // every later hide/show too (WM_CLOSE, SIZE_MINIMIZED, RestoreFromTray).
-    controller->put_IsVisible(IsWindowVisible(hwnd));
-    if (FAILED(controller->get_CoreWebView2(g_webview.GetAddressOf())) || !g_webview) {
-        WebViewFatalError(hwnd);
-        return;
-    }
-
-    HardenWebView(g_webview.Get());
-
-    // Matches the page's current background, so resizing never flashes the
-    // wrong color behind the (asynchronously repainted) web content.
-    ApplyWindowTheme(hwnd);
-
-    g_webview->add_WebMessageReceived(
-        Callback<ICoreWebView2WebMessageReceivedEventHandler>(
-            [hwnd](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
-                LPWSTR msg = nullptr;
-                if (SUCCEEDED(args->TryGetWebMessageAsString(&msg)) && msg) {
-                    HandleWebMessage(hwnd, msg);
-                    CoTaskMemFree(msg);
-                }
-                return S_OK;
-            }).Get(), &g_webMessageToken);
-
-    RECT rc;
-    GetClientRect(hwnd, &rc);
-    controller->put_Bounds(rc);
-
-    std::wstring html = LoadHtmlResource(IDR_UI_HTML);
-    if (html.empty()) {
-        WebViewFatalError(hwnd);
-        return;
-    }
-    g_webview->NavigateToString(html.c_str());
-}
-
-void InitWebView(HWND hwnd) {
-    // WebView2 refuses to write its profile next to Program Files; give it an
-    // explicit per-user data folder.
-    std::wstring userData;
-    wchar_t buf[MAX_PATH] = {};
-    if (GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH) > 0) {
-        userData = std::wstring(buf) + L"\\AudioLinker\\WebView2";
-    }
-
-    HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(nullptr,
-        userData.empty() ? nullptr : userData.c_str(), nullptr,
-        Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-            [hwnd](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
-                if (FAILED(result) || !env) {
-                    WebViewFatalError(hwnd);
-                    return S_OK;
-                }
-                g_webviewEnvironment = env; // reused by the Options window's controller
-                env->CreateCoreWebView2Controller(hwnd,
-                    Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-                        [hwnd](HRESULT result2, ICoreWebView2Controller* controller) -> HRESULT {
-                            if (FAILED(result2) || !controller) {
-                                WebViewFatalError(hwnd);
-                                return S_OK;
-                            }
-                            OnWebViewControllerReady(hwnd, controller);
-                            return S_OK;
-                        }).Get());
-                return S_OK;
-            }).Get());
-    if (FAILED(hr)) WebViewFatalError(hwnd);
-}
-
-// --- Background footprint ---
-// The app lives in the tray with its window hidden most of the time, but a
-// merely-invisible WebView2 keeps its full Chromium render tree warm
-// (150-250 MB across subprocesses). Suspending the page and asking the
-// browser process to trim (where the runtime supports both -- best-effort
-// QueryInterface otherwise) drops that to a fraction, for the cost of a
-// brief repaint at the next restore. The Options window is not involved:
-// its controller is destroyed outright when it closes.
-
-void SuspendMainWebView() {
-    // The page posts micmeter|0 and spectrum| from its visibilitychange
-    // handler, but suspension can win that race -- stop metering here too so
-    // the Windows "microphone in use" indicator never stays lit with the
-    // window hidden, and nobody computes a spectrum nobody can see.
-    StopMicMetering();
-    g_engine.setSpectrumTarget(L"");
-    if (!g_webviewController || !g_webview) return;
-    g_webviewController->put_IsVisible(FALSE); // TrySuspend requires hidden
-    ComPtr<ICoreWebView2_19> wv19;
-    if (SUCCEEDED(g_webview.As(&wv19)) && wv19) {
-        wv19->put_MemoryUsageTargetLevel(COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW);
-    }
-    ComPtr<ICoreWebView2_3> wv3;
-    if (SUCCEEDED(g_webview.As(&wv3)) && wv3) {
-        wv3->TrySuspend(Callback<ICoreWebView2TrySuspendCompletedHandler>(
-            [](HRESULT, BOOL) -> HRESULT { return S_OK; }).Get());
-    }
-}
-
-void ResumeMainWebView() {
-    if (!g_webviewController || !g_webview) return;
-    // put_IsVisible(TRUE) resumes a suspended page on its own; the explicit
-    // Resume() just removes any doubt about ordering across runtime versions.
-    ComPtr<ICoreWebView2_3> wv3;
-    BOOL suspended = FALSE;
-    if (SUCCEEDED(g_webview.As(&wv3)) && wv3 &&
-        SUCCEEDED(wv3->get_IsSuspended(&suspended)) && suspended) {
-        wv3->Resume();
-    }
-    ComPtr<ICoreWebView2_19> wv19;
-    if (SUCCEEDED(g_webview.As(&wv19)) && wv19) {
-        wv19->put_MemoryUsageTargetLevel(COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL);
-    }
-    g_webviewController->put_IsVisible(TRUE);
-}
-
-
 // --- Window placement (persisted as [window] x/y/w/h, the normal rect) ---
 
 // Captures the window's normal rect into the config (written with the next
@@ -251,6 +90,9 @@ bool LoadWindowPlacement(RECT& out) {
 
 // --- Window ---
 
+// Set by RunApplication before the window exists (--tray launch).
+bool g_startHidden = false;
+
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     // Registered (runtime) message id, so it can't live in the switch below:
     // a second instance asking this one to come to the foreground.
@@ -258,9 +100,18 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         RestoreFromTray(hwnd);
         return 0;
     }
+    // Frame-less window: sizing, focus, activation, DPI... are shared with
+    // the other windows (Panels.cpp).
+    {
+        bool handled = false;
+        LRESULT r = PanelCommonProc(PanelId::Launcher, hwnd, msg, wParam, lParam, handled);
+        if (handled) return r;
+    }
     switch (msg) {
         case WM_CREATE: {
             g_mainWnd = hwnd;
+            AttachLauncherWindow(hwnd, g_startHidden);
+            JournalInstall(); // the diagnostic log also feeds the Journal window
             // g_cfg was loaded in RunApplication (before the window existed).
             g_autostartPending = g_autostart;
             g_engine.setBaseCushionMs(g_baseCushionMs);
@@ -286,51 +137,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                                     L" (changer de setup) est déjà utilisé par une autre application.";
             }
             UpdateSetupDigitHotkeys(hwnd);
-            InitWebView(hwnd);
+            InitPanelWebViewEnvironment(hwnd);
             return 0;
         }
         case WM_SIZE:
-            if (wParam == SIZE_MINIMIZED) {
-                SaveWindowPlacement(hwnd);
-                ShowWindow(hwnd, SW_HIDE);
-                SuspendMainWebView();
-            } else if (g_webviewController) {
-                RECT rc;
-                GetClientRect(hwnd, &rc);
-                g_webviewController->put_Bounds(rc);
-                g_webviewController->put_IsVisible(TRUE);
-            }
+            // Minimized from the taskbar button: same as closing, the app
+            // lives in the tray.
+            if (wParam == SIZE_MINIMIZED) HideLauncherToTray();
             return 0;
-        case WM_GETMINMAXINFO: {
-            // Per-monitor DPI aware (see AudioLinker.manifest): logical
-            // pixel constants must be scaled by the window's current DPI.
-            auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
-            UINT dpi = GetDpiForWindow(hwnd);
-            if (dpi == 0) dpi = 96;
-            RECT r = { 0, 0, MulDiv(kMinClientW, static_cast<int>(dpi), 96),
-                             MulDiv(kMinClientH, static_cast<int>(dpi), 96) };
-            AdjustWindowRectExForDpi(&r, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_THICKFRAME,
-                                     FALSE, 0, dpi);
-            mmi->ptMinTrackSize.x = r.right - r.left;
-            mmi->ptMinTrackSize.y = r.bottom - r.top;
-            return 0;
-        }
-        case WM_DPICHANGED: {
-            // Moved to a monitor with a different scale factor: adopt the
-            // size/position Windows computed. WebView2 re-rasterizes on its
-            // own; the switcher popup already reads its DPI per-open.
-            auto* suggested = reinterpret_cast<RECT*>(lParam);
-            SetWindowPos(hwnd, nullptr, suggested->left, suggested->top,
-                         suggested->right - suggested->left, suggested->bottom - suggested->top,
-                         SWP_NOZORDER | SWP_NOACTIVATE);
-            return 0;
-        }
-        case WM_SETFOCUS:
-            // Hand keyboard focus straight to the web content: the host
-            // window itself has nothing focusable.
-            if (g_webviewController) {
-                g_webviewController->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
-            }
+        case WM_JOURNAL:
+            JournalFromMessage(lParam);
             return 0;
         case WM_TRAYICON: {
             if (LOWORD(lParam) == WM_LBUTTONUP) RestoreFromTray(hwnd);
@@ -382,24 +198,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 SetTimer(hwnd, IDT_RESUME, 2000, nullptr);
             }
             return TRUE;
-        case WM_SETTINGCHANGE:
-            // Windows broadcasts this with lParam == "ImmersiveColorSet" when
-            // the user toggles Settings > Personnalisation > Couleurs > Mode.
-            // ui.html re-themes itself via prefers-color-scheme automatically;
-            // this only re-syncs the native chrome (title bar, host brush).
-            if (lParam && wcscmp(reinterpret_cast<const wchar_t*>(lParam), L"ImmersiveColorSet") == 0) {
-                ApplyWindowTheme(hwnd);
-            }
-            return 0;
-        case WM_DWMCOLORIZATIONCOLORCHANGED:
-            // Windows accent color changed: the next state message carries
-            // the new value, the web UI recolors itself from it.
-            SendState();
-            return 0;
         case WM_CLOSE:
-            SaveWindowPlacement(hwnd);
-            ShowWindow(hwnd, SW_HIDE);
-            SuspendMainWebView();
+            HideLauncherToTray();
             return 0;
         case WM_COMMAND: {
             int id = LOWORD(wParam);
@@ -598,15 +398,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 DestroyWindow(g_switcherWnd);
                 g_switcherWnd = nullptr;
             }
-            if (g_optionsWnd) {
-                if (g_optionsController) {
-                    g_optionsController->Close();
-                    g_optionsController.Reset();
-                }
-                g_optionsWebview.Reset();
-                DestroyWindow(g_optionsWnd);
-                g_optionsWnd = nullptr;
-            }
+            if (!g_skipSaveOnExit) SavePanelPlacements();
+            DestroyAllPanels();
             g_deviceManager->unregisterNotifications(&DeviceNotificationSink());
             UnregisterHotKey(hwnd, HOTKEY_TOGGLE_GROUP);
             UnregisterHotKey(hwnd, HOTKEY_SETUP_SWITCHER);
@@ -617,19 +410,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             g_engine.stop();
             RestoreDefaultAndUnroute();
             if (!g_skipSaveOnExit) FlushConfig();
-            if (g_webview) {
-                g_webview->remove_WebMessageReceived(g_webMessageToken);
-                g_webview.Reset();
-            }
-            if (g_webviewController) {
-                g_webviewController->Close();
-                g_webviewController.Reset();
-            }
             DeleteObject(g_hBrushWindowBg);
-            if (g_optionsHBrushWindowBg) {
-                DeleteObject(g_optionsHBrushWindowBg);
-                g_optionsHBrushWindowBg = nullptr;
-            }
             PostQuitMessage(0);
             return 0;
     }
@@ -676,6 +457,7 @@ int RunApplication(HINSTANCE hInstance, int nCmdShow, bool startHidden, bool wai
     g_store.init();
     g_store.load(g_cfg);
 
+    g_startHidden = startHidden;
     g_windowBg = WindowBgForTheme(EffectiveLightTheme());
     g_hBrushWindowBg = CreateSolidBrush(g_windowBg);
     g_hAppIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_APPICON));
@@ -690,36 +472,32 @@ int RunApplication(HINSTANCE hInstance, int nCmdShow, bool startHidden, bool wai
     wc.hIcon = g_hAppIcon;
     RegisterClassW(&wc);
 
-    // Where the window goes: its last saved placement if it still lands on a
-    // monitor, otherwise the default size scaled by the DPI of the monitor
-    // under the cursor (per-monitor DPI aware; WM_DPICHANGED takes over if
-    // the window is later dragged to a differently-scaled screen).
-    int x = CW_USEDEFAULT, y = CW_USEDEFAULT, w, h;
+    // Where the launcher goes: its last saved position if it still lands on a
+    // monitor, otherwise the top-left corner of the work area of the monitor
+    // under the cursor. Its size is fixed (scaled by that monitor's DPI).
+    POINT cursor;
+    GetCursorPos(&cursor);
+    HMONITOR mon = MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY);
+    UINT dpi = 0, dpiY = 0;
+    if (FAILED(GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &dpi, &dpiY)) || dpi == 0) dpi = GetDpiForSystem();
+    if (dpi == 0) dpi = 96;
+    int w = MulDiv(kLauncherW, static_cast<int>(dpi), 96);
+    int h = MulDiv(kLauncherH, static_cast<int>(dpi), 96);
+    int x, y;
     RECT saved;
     if (LoadWindowPlacement(saved)) {
         x = saved.left;
         y = saved.top;
-        w = saved.right - saved.left;
-        h = saved.bottom - saved.top;
     } else {
-        POINT cursor;
-        GetCursorPos(&cursor);
-        UINT dpi = 0, dpiY = 0;
-        if (FAILED(GetDpiForMonitor(MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY),
-                                    MDT_EFFECTIVE_DPI, &dpi, &dpiY)) || dpi == 0) {
-            dpi = GetDpiForSystem();
-        }
-        if (dpi == 0) dpi = 96;
-        RECT r = { 0, 0, MulDiv(kDefaultClientW, static_cast<int>(dpi), 96),
-                         MulDiv(kDefaultClientH, static_cast<int>(dpi), 96) };
-        AdjustWindowRectExForDpi(&r, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_THICKFRAME,
-                                 FALSE, 0, dpi);
-        w = r.right - r.left;
-        h = r.bottom - r.top;
+        MONITORINFO mi = { sizeof(mi) };
+        GetMonitorInfoW(mon, &mi);
+        x = mi.rcWork.left + MulDiv(40, static_cast<int>(dpi), 96);
+        y = mi.rcWork.top + MulDiv(40, static_cast<int>(dpi), 96);
     }
-    HWND hwnd = CreateWindowExW(0, className, L"AudioLinker — Groupe d'enceintes",
-        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_THICKFRAME |
-            WS_MAXIMIZEBOX | WS_CLIPCHILDREN,
+    // Borderless (the page draws the frame), with a taskbar button: the
+    // launcher is how the app is found again.
+    HWND hwnd = CreateWindowExW(WS_EX_APPWINDOW, className, L"AudioLinker — Groupe d'enceintes",
+        WS_POPUP | WS_THICKFRAME | WS_CLIPCHILDREN,
         x, y, w, h,
         nullptr, nullptr, hInstance, nullptr);
     if (!hwnd) {
@@ -728,16 +506,16 @@ int RunApplication(HINSTANCE hInstance, int nCmdShow, bool startHidden, bool wai
         return 0;
     }
 
-    BOOL darkMode = EffectiveLightTheme() ? FALSE : TRUE;
-    DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &darkMode, sizeof(darkMode));
+    ApplyFlatFrame(hwnd);
 
     // --tray: stay hidden; the tray icon (added in WM_CREATE) is the only
     // presence until the user opens the window. WebView2 initializes fine
     // against a hidden host, so the UI is ready the moment it's shown.
     if (!startHidden) {
-        ShowWindow(hwnd, nCmdShow);
+        ShowWindow(hwnd, SW_SHOW);
         UpdateWindow(hwnd);
     }
+    (void)nCmdShow; // the launcher always opens at its saved place, whatever the shortcut asks
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0)) {

@@ -160,6 +160,13 @@ std::string SerializeConfig(const AppConfig& cfg) {
     w["w"] = cfg.window.w;
     w["h"] = cfg.window.h;
 
+    json& pj = j["panels"];
+    pj = json::object();
+    for (const auto& [key, pp] : cfg.panels) {
+        pj[key] = { { "x", pp.x }, { "y", pp.y }, { "w", pp.w }, { "h", pp.h },
+                    { "open", pp.open }, { "shaded", pp.shaded } };
+    }
+
     j["automation"] = json::array();
     for (const auto& r : cfg.automation) {
         json jr;
@@ -235,6 +242,19 @@ bool ParseConfig(const std::string& text, AppConfig& cfg) {
         c.window.y = Get(*w, "y", 0);
         c.window.w = Get(*w, "w", 0);
         c.window.h = Get(*w, "h", 0);
+    }
+    if (auto pj = j.find("panels"); pj != j.end() && pj->is_object()) {
+        for (const auto& [key, v] : pj->items()) {
+            if (!v.is_object()) continue;
+            PanelPlacement pp;
+            pp.x = Get(v, "x", 0);
+            pp.y = Get(v, "y", 0);
+            pp.w = Get(v, "w", 0);
+            pp.h = Get(v, "h", 0);
+            pp.open = Get(v, "open", false);
+            pp.shaded = Get(v, "shaded", false);
+            c.panels[key] = pp;
+        }
     }
     if (auto a = j.find("automation"); a != j.end() && a->is_array()) {
         for (const auto& jr : *a) {

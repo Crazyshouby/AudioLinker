@@ -1,15 +1,15 @@
 # Build-time inlining of the pieces shared by both WebView2 pages: replaces
 # the /*@common.css@*/ and /*@common.js@*/ markers in SRC with the contents
 # of CSS and JS, writing the self-contained page to DST (which the resource
-# script embeds). common.css itself carries /*@fonts.css@*/ and
-# /*@lava.css@*/ markers, common.js a /*@icons.js@*/ one (generated assets,
-# see tools/gen_assets.py). Run via `cmake -P` from a custom command, so
-# editing any input rebuilds the exe.
+# script embeds). common.css itself carries a /*@fonts.css@*/ marker,
+# common.js a /*@icons.js@*/ one (generated assets, see tools/gen_assets.py).
+# Run via `cmake -P` from a custom command, so editing any input rebuilds
+# the exe.
 #
 # Args: -DSRC=<page.html> -DDST=<page.gen.html> -DCSS=<common.css> -DJS=<common.js>
-#       -DFONTS=<fonts.css> -DLAVA=<lava.css> -DICONS=<icons.js>
+#       -DFONTS=<fonts.css> -DICONS=<icons.js>
 
-foreach(var SRC DST CSS JS FONTS LAVA ICONS)
+foreach(var SRC DST CSS JS FONTS ICONS)
     if(NOT DEFINED ${var})
         message(FATAL_ERROR "InlineAssets: missing -D${var}")
     endif()
@@ -19,10 +19,8 @@ file(READ "${SRC}" html)
 file(READ "${CSS}" css)
 file(READ "${JS}" js)
 file(READ "${FONTS}" fonts)
-file(READ "${LAVA}" lava)
 file(READ "${ICONS}" icons)
 string(REPLACE "/*@fonts.css@*/" "${fonts}" css "${css}")
-string(REPLACE "/*@lava.css@*/" "${lava}" css "${css}")
 string(REPLACE "/*@icons.js@*/" "${icons}" js "${js}")
 
 string(FIND "${html}" "/*@common.css@*/" css_pos)

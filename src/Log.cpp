@@ -11,6 +11,7 @@ namespace {
 std::mutex g_logMutex;
 std::wstring g_logPath;
 bool g_ready = false;
+LogSink g_sink = nullptr;
 
 // Rotate past ~512KB: a session is normally a few KB, this only trips if
 // something is looping and spamming, in which case one previous file is
@@ -73,11 +74,17 @@ void LogInit() {
     CloseHandle(h);
 }
 
+void SetLogSink(LogSink sink) {
+    std::lock_guard<std::mutex> lock(g_logMutex);
+    g_sink = sink;
+}
+
 namespace log_detail {
 
 void Write(const wchar_t* level, const std::wstring& msg) {
     std::lock_guard<std::mutex> lock(g_logMutex);
     if (!g_ready || g_logPath.empty()) return;
+    if (g_sink) g_sink(level, msg);
     std::wstring line = Timestamp() + L" [" + level + L"] " + msg + L"\r\n";
     std::string utf8;
     int len = WideCharToMultiByte(CP_UTF8, 0, line.c_str(), -1, nullptr, 0, nullptr, nullptr);

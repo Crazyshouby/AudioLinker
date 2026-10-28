@@ -14,16 +14,11 @@ namespace al {
 
 std::string U8(const std::wstring& w) { return ToUtf8(w); }
 
-void PostJsonText(const std::wstring& text) {
-    // Never poke the main WebView while its window is hidden: it may be
-    // suspended (see SuspendMainWebView) and a message would wake the whole
-    // page just to update something nobody can see. RestoreFromTray re-sends
-    // the full state on the way back.
-    if (g_webview && g_mainWnd && IsWindowVisible(g_mainWnd)) {
-        g_webview->PostWebMessageAsJson(text.c_str());
-    }
-    if (g_optionsWebview) g_optionsWebview->PostWebMessageAsJson(text.c_str());
-}
+// Every open window gets every message. Windows that are not showing (the
+// launcher hidden in the tray, its page suspended) are skipped: a message
+// would wake the whole page just to update something nobody can see.
+// RestoreFromTray re-sends the full state on the way back.
+void PostJsonText(const std::wstring& text) { PostToPanels(text); }
 
 void PostJson(const json& j) { PostJsonText(FromUtf8(j.dump())); }
 
@@ -37,7 +32,7 @@ const char* DeviceKindJson(AudioDeviceKind kind) {
     }
 }
 
-void SendState() {
+json BuildState() {
     COLORREF accent = GetWindowsAccentColor();
     char accentHex[8];
     snprintf(accentHex, sizeof(accentHex), "#%02x%02x%02x", GetRValue(accent), GetGValue(accent), GetBValue(accent));
@@ -123,8 +118,22 @@ void SendState() {
         j["inputs"].push_back({ { "id", U8(d.id) }, { "name", U8(d.name) }, { "default", d.isDefault },
                                 { "volume", micVol }, { "muted", micMuted } });
     }
-    PostJson(j);
+    // Which windows are open (the launcher buttons show it).
+    j["panels"] = json::object();
+    for (int i = 0; i < kPanelCount; ++i) {
+        j["panels"][PanelKey(static_cast<PanelId>(i))] = IsPanelOpen(static_cast<PanelId>(i));
+    }
+    return j;
+}
+
+void SendState() {
+    PostJson(BuildState());
     UpdateTrayState(); // every state change the tray could reflect passes here
+}
+
+// The full state for one window only (it just became ready).
+void SendStateTo(PanelId to) {
+    PostToPanel(to, FromUtf8(BuildState().dump()));
 }
 
 // Apps currently playing audio, for the speaker sheet's Source dropdown.
@@ -169,11 +178,13 @@ void SendPeaks() {
     PostJson(j);
 }
 
+// The persistent notice lives in the launcher, the window that is always there.
 void SendBanner(const std::wstring& message, const std::wstring& actionCmd,
                 const std::wstring& actionLabel) {
     json j = { { "type", "banner" }, { "message", U8(message) },
                { "action", U8(actionCmd) }, { "actionLabel", U8(actionLabel) } };
-    PostJson(j);
+    PostToPanel(PanelId::Launcher, FromUtf8(j.dump()));
+    if (!message.empty()) JournalAdd(1, message);
 }
 
 void SendStatus() {
@@ -239,25 +250,29 @@ void SendCalStatus() {
     PostJson(j);
 }
 
-// Toasts posted while the main window is hidden never reach the (suspended)
-// page: keep them for the next RestoreFromTray, and surface errors through
-// a tray balloon right away so a failed autostart at logon isn't just lost.
+// Toasts posted while no window is showing never reach a page: keep them for
+// the next RestoreFromTray, and surface errors through a tray balloon right
+// away so a failed autostart at logon is not just lost.
 void RememberHiddenToast(const json& j, const std::wstring& balloonText) {
-    if (!g_mainWnd || IsWindowVisible(g_mainWnd)) return;
+    if (!g_mainWnd || AnyPanelVisible()) return;
     if (g_pendingJson.size() >= 10) g_pendingJson.erase(g_pendingJson.begin());
     g_pendingJson.push_back(FromUtf8(j.dump()));
     if (!balloonText.empty()) ShowTrayBalloon(balloonText, NIIF_WARNING);
 }
 
+// A toast appears in one window only (see PostToastTarget) and is also
+// recorded in the Journal.
 void SendError(const std::wstring& message) {
     json j = { { "type", "error" }, { "message", U8(message) } };
-    PostJson(j);
+    PostToastTarget(FromUtf8(j.dump()));
+    JournalAdd(2, message);
     RememberHiddenToast(j, message);
 }
 
 void SendInfo(const std::wstring& message) {
     json j = { { "type", "info" }, { "message", U8(message) } };
-    PostJson(j);
+    PostToastTarget(FromUtf8(j.dump()));
+    JournalAdd(0, message);
     RememberHiddenToast(j, L"");
 }
 
@@ -266,7 +281,8 @@ void SendErrorWithAction(const std::wstring& message, const std::wstring& comman
                          const std::wstring& label) {
     json j = { { "type", "error" }, { "message", U8(message) },
                { "action", U8(command) }, { "actionLabel", U8(label) } };
-    PostJson(j);
+    PostToastTarget(FromUtf8(j.dump()));
+    JournalAdd(2, message);
     RememberHiddenToast(j, message);
 }
 
@@ -292,9 +308,8 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
         }
         // --tray launch: the page was loaded into a window that has never
         // been shown and may never be this session -- don't keep a full
-        // Chromium render tree warm for it. (No-op when the window is
-        // visible, e.g. this ready came from the Options page.)
-        if (g_mainWnd && !IsWindowVisible(g_mainWnd)) SuspendMainWebView();
+        // Chromium render tree warm for it.
+        if (g_mainWnd && !IsWindowVisible(g_mainWnd)) SuspendLauncherPage();
         return;
     }
     if (cmd == L"toggle") { ToggleGroup(hwnd); return; }
@@ -349,7 +364,7 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
         }
         return;
     }
-    if (cmd == L"openoptions") { OpenOptionsWindow(g_mainWnd); return; }
+    if (cmd == L"openoptions") { OpenPanel(PanelId::Options); return; }
     if (cmd == L"exportconfig") { ExportConfig(hwnd); return; }
     if (cmd == L"importconfig") { ImportConfig(hwnd); return; }
     if (cmd == L"autostart") { g_autostart = (rest == L"1"); SaveConfig(); return; }
@@ -429,9 +444,7 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
         return;
     }
     if (cmd == L"theme") {
-        g_themeOverride = ClampThemeOverride(_wtoi(rest.c_str()));
-        ApplyWindowTheme(g_mainWnd);
-        ApplyOptionsWindowTheme();
+        g_themeOverride = ClampThemeOverride(_wtoi(rest.c_str())); // legacy: the look no longer depends on it
         SaveConfig();
         SendState();
         return;
@@ -452,8 +465,6 @@ void HandleWebMessage(HWND hwnd, const std::wstring& msg) {
         g_setupDigitHotkeys = true;
         UpdateSetupDigitHotkeys(g_mainWnd);
         g_themeOverride = 0;
-        ApplyWindowTheme(g_mainWnd);
-        ApplyOptionsWindowTheme();
         RebindHotkey(g_mainWnd, HOTKEY_TOGGLE_GROUP, g_toggleHotkeyMods, g_toggleHotkeyVk,
                      MOD_CONTROL | MOD_ALT, 'G');
         RebindHotkey(g_mainWnd, HOTKEY_SETUP_SWITCHER, g_switcherHotkeyMods, g_switcherHotkeyVk,
