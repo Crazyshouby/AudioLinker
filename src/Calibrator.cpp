@@ -1,9 +1,10 @@
 #include "Calibrator.h"
+#include "ComUtil.h"
+#include "WasapiStream.h"
 
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
-#include <ksmedia.h>
 #include <wrl/client.h>
 #include <algorithm>
 #include <cmath>
@@ -30,17 +31,6 @@ constexpr double kListenSec = 1.5;
 // to count as a detection rather than noise.
 constexpr double kMinPeakRatio = 6.0;
 
-struct ComScope {
-    bool ownsInit = false;
-    ComScope() {
-        HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        ownsInit = (hr == S_OK || hr == S_FALSE);
-    }
-    ~ComScope() {
-        if (ownsInit) CoUninitialize();
-    }
-};
-
 // QPC in 100ns units -- the same unit IAudioCaptureClient::GetBuffer reports
 // its packet timestamps in, so the two are directly comparable. Split
 // arithmetic avoids the int64 overflow of a naive (qpc * 1e7) on machines
@@ -54,15 +44,6 @@ INT64 NowHns() {
     LARGE_INTEGER c;
     QueryPerformanceCounter(&c);
     return (c.QuadPart / freq) * 10'000'000LL + (c.QuadPart % freq) * 10'000'000LL / freq;
-}
-
-bool IsFloatFormat(const WAVEFORMATEX* wfx) {
-    if (wfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) return true;
-    if (wfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE) {
-        const auto* ext = reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(wfx);
-        return ext->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
-    }
-    return false;
 }
 
 // Logarithmic sine sweep with short fades so it starts/ends without clicks.
@@ -87,34 +68,24 @@ std::vector<float> MakeChirp(int rate) {
 class MicRecorder {
 public:
     bool open(IMMDeviceEnumerator* enumerator, const std::wstring& micId) {
-        ComPtr<IMMDevice> device;
-        if (FAILED(enumerator->GetDevice(micId.c_str(), device.GetAddressOf()))) return false;
-        if (FAILED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
-                                     reinterpret_cast<void**>(client_.GetAddressOf())))) return false;
-        WAVEFORMATEX* fmt = nullptr;
-        if (FAILED(client_->GetMixFormat(&fmt)) || !fmt) return false;
-        isFloat_ = IsFloatFormat(fmt);
-        channels_ = fmt->nChannels;
-        rate_ = static_cast<int>(fmt->nSamplesPerSec);
-        bool supported = isFloat_ || fmt->wBitsPerSample == 16;
-        HRESULT hr = supported
-            ? client_->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 5'000'000 /*500ms*/, 0, fmt, nullptr)
-            : E_FAIL;
-        CoTaskMemFree(fmt);
-        if (FAILED(hr)) return false;
-        if (FAILED(client_->GetService(__uuidof(IAudioCaptureClient),
-                                        reinterpret_cast<void**>(capture_.GetAddressOf())))) return false;
-        return SUCCEEDED(client_->Start());
+        if (!OpenSharedClient(enumerator, micId, sc_, L"micro de calage")) return false;
+        if (FAILED(sc_.client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 5'000'000 /*500ms*/, 0,
+                                          sc_.mix, nullptr))) return false;
+        if (FAILED(sc_.client->GetService(__uuidof(IAudioCaptureClient),
+                                          reinterpret_cast<void**>(capture_.GetAddressOf())))) return false;
+        return SUCCEEDED(sc_.client->Start());
     }
 
     void stop() {
-        if (client_) client_->Stop();
+        if (sc_.client) sc_.client->Stop();
     }
 
-    int rate() const { return rate_; }
+    int rate() const { return sc_.format.rate; }
 
     // Drains everything currently buffered; call every few ms while playing.
     bool drain() {
+        const int rate_ = sc_.format.rate;
+        const int channels_ = sc_.format.channels;
         // Runaway guard: a pass is tens of seconds at most.
         if (samples_.size() > static_cast<size_t>(rate_) * 180) return false;
         UINT32 packet = 0;
@@ -141,19 +112,14 @@ public:
             samples_.resize(base + frames);
             if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
                 std::fill(samples_.begin() + base, samples_.end(), 0.0f);
-            } else if (isFloat_) {
-                const float* src = reinterpret_cast<const float*>(data);
+            } else {
+                // Mono downmix of the interleaved packet.
+                scratch_.resize(static_cast<size_t>(frames) * channels_);
+                ToFloat(data, scratch_.size(), sc_.format, scratch_.data());
                 for (UINT32 f = 0; f < frames; ++f) {
                     float sum = 0.0f;
-                    for (int c = 0; c < channels_; ++c) sum += src[static_cast<size_t>(f) * channels_ + c];
+                    for (int c = 0; c < channels_; ++c) sum += scratch_[static_cast<size_t>(f) * channels_ + c];
                     samples_[base + f] = sum / channels_;
-                }
-            } else {
-                const int16_t* src = reinterpret_cast<const int16_t*>(data);
-                for (UINT32 f = 0; f < frames; ++f) {
-                    int sum = 0;
-                    for (int c = 0; c < channels_; ++c) sum += src[static_cast<size_t>(f) * channels_ + c];
-                    samples_[base + f] = static_cast<float>(sum) / (channels_ * 32768.0f);
                 }
             }
             capture_->ReleaseBuffer(frames);
@@ -163,6 +129,7 @@ public:
     }
 
     size_t hnsToSample(INT64 hns) const {
+        const int rate_ = sc_.format.rate;
         for (size_t i = marks_.size(); i-- > 0;) {
             if (marks_[i].hns <= hns) {
                 size_t s = marks_[i].sample +
@@ -174,6 +141,7 @@ public:
     }
 
     INT64 sampleToHns(size_t sample) const {
+        const int rate_ = sc_.format.rate;
         for (size_t i = marks_.size(); i-- > 0;) {
             if (marks_[i].sample <= sample) {
                 return marks_[i].hns +
@@ -186,11 +154,9 @@ public:
     const std::vector<float>& samples() const { return samples_; }
 
 private:
-    ComPtr<IAudioClient> client_;
+    SharedClient sc_;
     ComPtr<IAudioCaptureClient> capture_;
-    int channels_ = 2;
-    int rate_ = 48000;
-    bool isFloat_ = true;
+    std::vector<float> scratch_;
     std::vector<float> samples_;
     struct Mark { size_t sample; INT64 hns; };
     std::vector<Mark> marks_;
@@ -204,29 +170,25 @@ private:
 // actually applied -- the backlog group playback keeps, added back so the
 // measured delay models it.
 bool PlaySweep(IMMDeviceEnumerator* enumerator, const std::wstring& deviceId,
-               MicRecorder& mic, const std::atomic<bool>& cancel, int fillMs,
+               MicRecorder& mic, const std::atomic<bool>& cancel, int fillMs, bool lowLatency,
                INT64& dacHnsOut, int& backlogMsOut) {
-    ComPtr<IMMDevice> device;
-    ComPtr<IAudioClient> client;
+    SharedClient sc;
     ComPtr<IAudioRenderClient> render;
-    if (FAILED(enumerator->GetDevice(deviceId.c_str(), device.GetAddressOf()))) return false;
-    if (FAILED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
-                                 reinterpret_cast<void**>(client.GetAddressOf())))) return false;
-    WAVEFORMATEX* fmt = nullptr;
-    if (FAILED(client->GetMixFormat(&fmt)) || !fmt) return false;
-    const bool isFloat = IsFloatFormat(fmt);
-    const int channels = fmt->nChannels;
-    const int rate = static_cast<int>(fmt->nSamplesPerSec);
-    bool supported = isFloat || fmt->wBitsPerSample == 16;
-    // Same 150ms buffer the engine's render sessions request, so bufferMsOut
-    // (the "kept full" backlog) matches what group playback will really use.
-    HRESULT hr = supported
-        ? client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 1'500'000, 0, fmt, nullptr)
-        : E_FAIL;
-    CoTaskMemFree(fmt);
-    if (FAILED(hr)) return false;
+    if (!OpenSharedClient(enumerator, deviceId, sc, L"balayage de calage")) return false;
+    IAudioClient* client = sc.client.Get();
+    const int channels = sc.format.channels;
+    const int rate = sc.format.rate;
+    // The exact stream setup of the engine's render sessions (same buffer,
+    // same low-latency period when enabled), so backlogMsOut -- the "kept
+    // full" part -- matches what group playback will really use. The event
+    // is required by the event-driven init; this loop keeps polling instead.
+    struct EventHandle {
+        HANDLE h = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        ~EventHandle() { if (h) CloseHandle(h); }
+    } evt;
     UINT32 bufferFrames = 0;
-    if (FAILED(client->GetBufferSize(&bufferFrames)) || bufferFrames == 0) return false;
+    if (!evt.h || !InitRenderStream(client, sc.mix, evt.h, lowLatency, &bufferFrames, L"balayage")) return false;
+    if (bufferFrames == 0) return false;
     if (FAILED(client->GetService(__uuidof(IAudioRenderClient),
                                    reinterpret_cast<void**>(render.GetAddressOf())))) return false;
     UINT32 fillFrames = static_cast<UINT32>(static_cast<INT64>(fillMs) * rate / 1000);
@@ -234,6 +196,7 @@ bool PlaySweep(IMMDeviceEnumerator* enumerator, const std::wstring& deviceId,
     backlogMsOut = static_cast<int>(static_cast<INT64>(fillFrames) * 1000 / rate);
 
     const std::vector<float> chirp = MakeChirp(rate);
+    std::vector<float> frameBuf;
     INT64 silenceLeft = static_cast<INT64>(rate * kWarmupSec);
     size_t chirpPos = 0;
     INT64 tailLeft = static_cast<INT64>(rate * (kListenSec + 0.2));
@@ -262,17 +225,12 @@ bool PlaySweep(IMMDeviceEnumerator* enumerator, const std::wstring& deviceId,
                     dacHnsOut = NowHns() + static_cast<INT64>(padding) * 10'000'000LL / rate;
                     dacSet = true;
                 }
+                frameBuf.resize(static_cast<size_t>(n) * channels);
                 for (UINT32 f = 0; f < n; ++f) {
                     float v = chirp[chirpPos + f];
-                    if (isFloat) {
-                        float* dst = reinterpret_cast<float*>(buf) + static_cast<size_t>(f) * channels;
-                        for (int c = 0; c < channels; ++c) dst[c] = v;
-                    } else {
-                        auto s16 = static_cast<int16_t>(std::clamp(v, -1.0f, 1.0f) * 32767.0f);
-                        int16_t* dst = reinterpret_cast<int16_t*>(buf) + static_cast<size_t>(f) * channels;
-                        for (int c = 0; c < channels; ++c) dst[c] = s16;
-                    }
+                    for (int c = 0; c < channels; ++c) frameBuf[static_cast<size_t>(f) * channels + c] = v;
                 }
+                FromFloat(frameBuf.data(), frameBuf.size(), sc.format, buf);
                 render->ReleaseBuffer(n, 0);
                 chirpPos += n;
             } else if (tailLeft > 0) {
@@ -329,11 +287,12 @@ Calibrator::~Calibrator() {
 }
 
 bool Calibrator::start(const std::wstring& micId, const std::vector<std::wstring>& outputIds,
-                       int deviceFillMs) {
+                       int deviceFillMs, bool lowLatency) {
     if (running_.load()) return false;
     if (worker_.joinable()) worker_.join();
     cancel_ = false;
     deviceFillMs_ = deviceFillMs;
+    lowLatency_ = lowLatency;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         error_.clear();
@@ -375,11 +334,7 @@ void Calibrator::fail(const std::wstring& error) {
 void Calibrator::worker(std::wstring micId) {
     ComScope com;
     ComPtr<IMMDeviceEnumerator> enumerator;
-    if (com.ownsInit) {
-        CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
-                         __uuidof(IMMDeviceEnumerator),
-                         reinterpret_cast<void**>(enumerator.GetAddressOf()));
-    }
+    if (com.ownsInit) enumerator = CreateDeviceEnumerator();
     if (!enumerator) {
         fail(L"Initialisation audio impossible pour le calage micro.");
         running_ = false;
@@ -404,7 +359,7 @@ void Calibrator::worker(std::wstring micId) {
         setState(i, CalState::Measuring);
         INT64 dacHns = 0;
         int backlogMs = 0;
-        bool played = PlaySweep(enumerator.Get(), ids[i], mic, cancel_, deviceFillMs_,
+        bool played = PlaySweep(enumerator.Get(), ids[i], mic, cancel_, deviceFillMs_, lowLatency_,
                                 dacHns, backlogMs);
         if (played && !cancel_.load()) {
             // Let the recording catch up with the sweep's tail end.

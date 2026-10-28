@@ -57,6 +57,19 @@ public:
         return toWrite;
     }
 
+    // Frame-safe variants for interleaved audio: a short write (ring nearly
+    // full) is rounded down to whole frames of `frameSamples` samples. A plain
+    // write() truncated to an odd sample count shifts every later frame the
+    // reader sees by one sample -- permanently swapped left/right channels
+    // after a long render stall (frozen Bluetooth link) until a full drop.
+    size_t writeAligned(const float* data, size_t count, size_t frameSamples) {
+        return write(data, alignedCount(count, frameSamples));
+    }
+
+    size_t writeSilenceAligned(size_t count, size_t frameSamples) {
+        return writeSilence(alignedCount(count, frameSamples));
+    }
+
     size_t read(float* data, size_t count) {
         size_t avail = availableToRead();
         size_t toRead = std::min(count, avail);
@@ -79,6 +92,14 @@ public:
     }
 
 private:
+    // Largest sample count <= min(count, free space) that is a whole number
+    // of frames.
+    size_t alignedCount(size_t count, size_t frameSamples) const {
+        size_t n = std::min(count, availableToWrite());
+        if (frameSamples > 1) n -= n % frameSamples;
+        return n;
+    }
+
     std::vector<float> buffer_;
     size_t mask_;
     std::atomic<size_t> writeIndex_{0};

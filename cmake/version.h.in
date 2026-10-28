@@ -1,0 +1,13 @@
+// Generated from CMakeLists.txt's project(VERSION ...) -- the single place
+// the version is defined. Included by C++ (About/Options) and by the
+// resource script (VERSIONINFO), hence plain #defines and classic guards.
+#ifndef AUDIOLINKER_VERSION_H
+#define AUDIOLINKER_VERSION_H
+
+#define AL_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define AL_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define AL_VERSION_PATCH @PROJECT_VERSION_PATCH@
+#define AL_VERSION_STR "@PROJECT_VERSION@"
+#define AL_VERSION_RC @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+
+#endif

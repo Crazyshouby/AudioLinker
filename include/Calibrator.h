@@ -31,12 +31,14 @@ class Calibrator {
 public:
     ~Calibrator();
 
-    // Starts a pass measuring outputIds in order. deviceFillMs is the
-    // engine's current device-buffer fill target (see kDefaultDeviceFillMs):
-    // the sweep playback replicates it so the measured backlog matches what
-    // group playback will really have. False if a pass is already running.
+    // Starts a pass measuring outputIds in order. deviceFillMs and
+    // lowLatency are the engine's current device-buffer fill target and
+    // period mode (see kDefaultDeviceFillMs, AudioEngine::setLowLatency):
+    // the sweep playback replicates them so the measured backlog matches
+    // what group playback will really have. False if a pass is already
+    // running.
     bool start(const std::wstring& micId, const std::vector<std::wstring>& outputIds,
-               int deviceFillMs);
+               int deviceFillMs, bool lowLatency);
     void cancel(); // async: signals the worker and returns immediately
     bool isRunning() const { return running_.load(); }
 
@@ -57,6 +59,7 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> cancel_{false};
     int deviceFillMs_ = 60; // set by start(), read only by the worker
+    bool lowLatency_ = false;
 
     std::mutex mutex_;
     std::wstring error_;

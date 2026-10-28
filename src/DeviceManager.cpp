@@ -109,7 +109,6 @@ std::vector<AudioDeviceInfo> DeviceManager::enumerate(EDataFlow flow) {
         info.id = id;
         info.name = name;
         info.isDefault = (id == defaultId);
-        info.isRender = (flow == eRender);
         info.kind = kind;
         result.push_back(std::move(info));
     }

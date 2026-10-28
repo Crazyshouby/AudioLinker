@@ -38,6 +38,14 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     if (argv) LocalFree(argv);
 
     if (listOnly) {
+        // WIN32 subsystem: there is no console unless we attach to the one
+        // this was launched from (output redirected to a file still works
+        // as before -- AttachConsole simply fails and stdout stays as is).
+        if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+            FILE* out = nullptr;
+            freopen_s(&out, "CONOUT$", "w", stdout);
+            wprintf(L"\n"); // the shell prompt is still on the current line
+        }
         _setmode(_fileno(stdout), _O_U16TEXT);
         PrintDeviceList();
         fflush(stdout);

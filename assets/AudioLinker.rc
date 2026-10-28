@@ -1,13 +1,17 @@
 #include "resource.h"
+#include "version.h"
 #include <winver.h>
 
 IDI_APPICON ICON "AudioLinker.ico"
-IDR_UI_HTML RCDATA "ui.html"
-IDR_OPTIONS_HTML RCDATA "options.html"
+// The pages are embedded from their build-time generated, self-contained
+// versions (common.css/common.js inlined -- see cmake/InlineAssets.cmake),
+// found through the include path that CMake points at the gen/ directory.
+IDR_UI_HTML RCDATA "ui.gen.html"
+IDR_OPTIONS_HTML RCDATA "options.gen.html"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,0,0
- PRODUCTVERSION 1,0,0,0
+ FILEVERSION AL_VERSION_RC
+ PRODUCTVERSION AL_VERSION_RC
  FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
  FILEFLAGS 0x0L
  FILEOS VOS_NT_WINDOWS32
@@ -21,11 +25,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Valentin"
             VALUE "FileDescription", "AudioLinker - Groupe d'enceintes multi-sorties"
-            VALUE "FileVersion", "1.0.0.0"
+            VALUE "FileVersion", AL_VERSION_STR
             VALUE "InternalName", "AudioLinker"
             VALUE "OriginalFilename", "AudioLinker.exe"
             VALUE "ProductName", "AudioLinker"
-            VALUE "ProductVersion", "1.0.0.0"
+            VALUE "ProductVersion", AL_VERSION_STR
         END
     END
     BLOCK "VarFileInfo"

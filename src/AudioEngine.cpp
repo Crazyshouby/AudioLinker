@@ -1,14 +1,14 @@
 #include "AudioEngine.h"
+#include "ComUtil.h"
 #include "Resampler.h"
 #include "Eq.h"
 #include "Log.h"
+#include "WasapiStream.h"
 
 #include <mmdeviceapi.h>
 #include <audioclient.h>
 #include <audioclientactivationparams.h>
-#include <audiopolicy.h>
 #include <endpointvolume.h>
-#include <ksmedia.h>
 #include <wrl/client.h>
 #include <avrt.h>
 #include <timeapi.h>
@@ -22,59 +22,29 @@ using Microsoft::WRL::ComPtr;
 
 namespace {
 
-bool isFloatFormat(const WAVEFORMATEX* wfx) {
-    if (wfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) return true;
-    if (wfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE) {
-        const auto* ext = reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(wfx);
-        return ext->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
-    }
-    return false;
-}
-
-// The convert paths below only handle float32 and 16-bit PCM. Shared-mode
-// mix formats are float32 in practice, so this should never trip -- but if
-// a driver ever hands back something else (24/32-bit int PCM), refusing it
-// beats reinterpreting its samples as int16 and playing corrupted noise.
-bool isSupportedFormat(const WAVEFORMATEX* wfx) {
-    return isFloatFormat(wfx) || wfx->wBitsPerSample == 16;
-}
-
-// Baseline cushion kept in every output's ring buffer on top of its
-// configured extra latency. Absorbs scheduling jitter between the capture
-// thread and each independent render thread/device clock (not clock drift,
-// which the resampler corrects). It applies uniformly to every output, so
-// it never affects sync between them -- only the group's absolute latency
-// vs. the source. User-adjustable via setBaseCushionMs() -- see
-// kDefaultBaseCushionMs in AudioEngine.h for the tradeoff. (It sat at 300ms
-// for a while, widened chasing crackles that were later traced to Bluetooth
-// radio bandwidth -- something no application-side cushion can absorb.)
-std::atomic<int> g_baseCushionMs{kDefaultBaseCushionMs};
-// Target device-buffer backlog -- see kDefaultDeviceFillMs in AudioEngine.h.
-// The render loop tops the WASAPI buffer up to this level only, instead of
-// keeping the whole 150ms allocation full: that full allocation used to add
-// a flat ~150ms of latency to every output.
-std::atomic<int> g_deviceFillMs{kDefaultDeviceFillMs};
-// When on, render (and capture) streams are initialized with IAudioClient3's
-// minimum shared-mode period instead of the classic ~10ms one, on drivers
-// that support it -- tighter callbacks and a smaller device-buffer floor, so
-// the fill target can go genuinely lower. Off by default: the smaller buffer
-// is less forgiving of scheduling hiccups. See AudioEngine::setLowLatency.
-std::atomic<bool> g_lowLatency{false};
 // Linear fade-in applied to the first few ms of audio played right after a
 // hard drift-correction drop, so the jump to a different point in the stream
 // isn't an audible click.
 constexpr int kDeclickFadeMs = 5;
 
-struct ComScope {
-    bool ownsInit = false;
-    ComScope() {
-        HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        ownsInit = (hr == S_OK || hr == S_FALSE);
-    }
-    ~ComScope() {
-        if (ownsInit) CoUninitialize();
-    }
-};
+// Process-loopback capture: how long to wait for the app's next packet
+// before topping the rings up with silence (see runCaptureSession). Must
+// stay well under the smallest cushion (kMinBaseCushionMs) or the render
+// side drains the ring before the pad lands.
+constexpr DWORD kProcessIdleWaitMs = 40;
+
+// Soft clip above this level: the render thread hands float samples to the
+// Windows mixer unclamped, so an EQ boost on a loud passage used to clip
+// hard there. Gentle knee, reaches exactly 1.0 only asymptotically.
+constexpr float kSoftClipKnee = 0.95f;
+inline float SoftClip(float x) {
+    float a = x < 0.0f ? -x : x;
+    if (a <= kSoftClipKnee) return x;
+    float e = a - kSoftClipKnee;
+    float y = kSoftClipKnee + e / (1.0f + e * 8.0f);
+    if (y > 1.0f) y = 1.0f;
+    return x < 0.0f ? -y : y;
+}
 
 // Without this, Sleep(10) in the capture loop is bound by the default system
 // timer granularity (commonly ~15ms on modern Windows when nothing has
@@ -105,21 +75,17 @@ HANDLE EnableProAudioMmcss() {
     return mmcssHandle;
 }
 
-ComPtr<IMMDeviceEnumerator> CreateDeviceEnumerator() {
-    ComPtr<IMMDeviceEnumerator> enumerator;
-    CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
-                     __uuidof(IMMDeviceEnumerator),
-                     reinterpret_cast<void**>(enumerator.GetAddressOf()));
-    return enumerator;
-}
-
 // Ring-buffer cushion (in samples, i.e. frames * channels) kept on top of an
-// output's configured extra latency -- see kBaseCushionMs. Shared by the
-// initial pre-roll, the post-reconnect cushion rebuild, and the periodic
-// drift-check target so the three can never drift out of sync with each
-// other over a future rounding/unit change.
-size_t CushionSamples(int latencyMs, int sampleRate, int channels) {
-    int64_t ms = g_baseCushionMs.load() + latencyMs;
+// output's configured extra latency. The base cushion absorbs scheduling
+// jitter between the capture thread and each independent render thread (not
+// clock drift, which the resampler corrects); it applies uniformly to every
+// output, so it never affects sync between them -- only the group's
+// absolute latency vs. the source (see kDefaultBaseCushionMs). Shared by
+// the initial pre-roll, the post-reconnect cushion rebuild, the idle top-up
+// and the periodic drift-check target so they can never drift out of sync
+// with each other over a future rounding/unit change.
+size_t CushionSamples(int baseCushionMs, int latencyMs, int sampleRate, int channels) {
+    int64_t ms = static_cast<int64_t>(baseCushionMs) + latencyMs;
     return static_cast<size_t>(ms * sampleRate / 1000) * static_cast<size_t>(channels);
 }
 
@@ -208,12 +174,18 @@ AudioEngine::AudioEngine() = default;
 
 AudioEngine::~AudioEngine() {
     stop();
+    stopMicMetering();
+    joinIdentifyJobs(false);
 }
 
 bool AudioEngine::start(const std::wstring& sourceId, bool sourceIsLoopback,
                          const std::wstring& masterVolumeDeviceId,
                          const std::vector<OutputLinkConfig>& outputConfigs,
-                         std::wstring& errorOut) {
+                         std::wstring& errorOut, bool systemExcludeSelf) {
+    if (stopping_.load()) {
+        errorOut = L"Le moteur est en cours d'arrêt.";
+        return false;
+    }
     if (running_.load() || starting_.load()) {
         errorOut = L"Le moteur est déjà démarré.";
         return false;
@@ -222,9 +194,11 @@ bool AudioEngine::start(const std::wstring& sourceId, bool sourceIsLoopback,
         errorOut = L"Aucune sortie sélectionnée.";
         return false;
     }
-    // A previous attempt's starterThread_ is guaranteed finished by now
-    // (starting_ is false), but still needs joining before we can reuse it.
+    // A previous attempt's starterThread_ (and a previous stopAsync()'s
+    // stopperThread_) are guaranteed finished by now -- starting_/stopping_
+    // are false -- but still need joining before they can be reused.
     if (starterThread_.joinable()) starterThread_.join();
+    if (stopperThread_.joinable()) stopperThread_.join();
 
     {
         std::lock_guard<std::mutex> lock(outputsMutex_);
@@ -245,10 +219,10 @@ bool AudioEngine::start(const std::wstring& sourceId, bool sourceIsLoopback,
         }
     }
 
+    systemExcludeSelf_ = systemExcludeSelf;
     running_ = true;
     starting_ = true;
     hasStartError_ = false;
-    captureInitFails_ = 0;
     masterVolumeScalar_ = 1.0f;
     masterMuted_ = false;
 
@@ -301,6 +275,11 @@ void AudioEngine::starterThreadProc(std::wstring sourceId, bool sourceIsLoopback
             appPids.push_back(state->sourcePid);
         }
     }
+    {
+        std::lock_guard<std::mutex> lock(startMutex_);
+        captureInitPending_ = (needSystem ? 1 : 0) + static_cast<int>(appPids.size());
+        captureInitFailed_ = false;
+    }
     if (needSystem) {
         captureThreads_.emplace_back(&AudioEngine::captureThreadProc, this, sourceId,
                                      sourceIsLoopback, masterVolumeDeviceId, 0ul);
@@ -310,16 +289,49 @@ void AudioEngine::starterThreadProc(std::wstring sourceId, bool sourceIsLoopback
                                      false, std::wstring(), pid);
     }
 
-    // Give the capture side a moment to fail fast (bad device id, format
-    // negotiation failure, vanished app) so a bad start is still reported,
-    // just not synchronously to the original caller anymore.
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    if (!running_.load() || captureInitFails_.load() > 0) {
+    // Wait for every capture thread's first stream init to report in (see
+    // reportCaptureInit) rather than peeking after a fixed delay: a
+    // process-loopback activation alone can take up to 3s, and a failure
+    // landing after such a window used to leave a "running" group whose
+    // source was silently dead for good.
+    bool captureFailed;
+    {
+        std::unique_lock<std::mutex> lock(startMutex_);
+        startCv_.wait_for(lock, std::chrono::seconds(5), [&] {
+            return captureInitPending_ == 0 || !running_.load();
+        });
+        captureFailed = captureInitFailed_ || captureInitPending_ > 0;
+    }
+    if (!running_.load()) {
+        starting_ = false; // stop() was called meanwhile; it owns cleanup
+        return;
+    }
+    if (captureFailed) {
         failStart(L"Impossible d'initialiser le périphérique source.");
         return;
     }
 
     starting_ = false; // success: isRunning() now reports true
+}
+
+void AudioEngine::reportCaptureInit(bool ok) {
+    {
+        std::lock_guard<std::mutex> lock(startMutex_);
+        if (!ok) captureInitFailed_ = true;
+        if (captureInitPending_ > 0) --captureInitPending_;
+    }
+    startCv_.notify_all();
+}
+
+void AudioEngine::joinAndClearOutputs() {
+    std::vector<std::unique_ptr<OutputState>> doomed;
+    {
+        std::lock_guard<std::mutex> lock(outputsMutex_);
+        doomed.swap(outputs_);
+    }
+    for (auto& state : doomed) {
+        if (state->thread.joinable()) state->thread.join();
+    }
 }
 
 void AudioEngine::failStart(const std::wstring& error) {
@@ -328,13 +340,7 @@ void AudioEngine::failStart(const std::wstring& error) {
         if (t.joinable()) t.join();
     }
     captureThreads_.clear();
-    {
-        std::lock_guard<std::mutex> lock(outputsMutex_);
-        for (auto& state : outputs_) {
-            if (state->thread.joinable()) state->thread.join();
-        }
-        outputs_.clear();
-    }
+    joinAndClearOutputs();
     {
         std::lock_guard<std::mutex> lock(startErrorMutex_);
         startError_ = error;
@@ -351,9 +357,18 @@ bool AudioEngine::takeStartError(std::wstring& errorOut) {
 }
 
 void AudioEngine::stop() {
+    // An asynchronous stop may be in flight: let it finish, it does the
+    // same work.
+    if (stopperThread_.joinable()) stopperThread_.join();
     running_ = false;
-    // Join the starter first: it may still be mid-negotiation (waiting on
-    // formatReady, or in the 200ms post-capture-launch check) and touches
+    // Wake a starter still waiting on the capture threads' init reports
+    // (taking the mutex first so the wake-up can't slip between its
+    // predicate check and its wait).
+    {
+        std::lock_guard<std::mutex> lock(startMutex_);
+    }
+    startCv_.notify_all();
+    // Join the starter first: it may still be mid-negotiation and touches
     // captureThreads_/outputs_ itself on failure -- must not race with the
     // cleanup below.
     if (starterThread_.joinable()) starterThread_.join();
@@ -361,13 +376,36 @@ void AudioEngine::stop() {
         if (t.joinable()) t.join();
     }
     captureThreads_.clear();
-
-    std::lock_guard<std::mutex> lock(outputsMutex_);
-    for (auto& state : outputs_) {
-        if (state->thread.joinable()) state->thread.join();
-    }
-    outputs_.clear();
+    joinAndClearOutputs();
     starting_ = false;
+}
+
+void AudioEngine::stopAsync() {
+    if (stopping_.exchange(true)) return; // already winding down
+    if (!running_.load() && !starting_.load()) {
+        stopping_ = false; // nothing to stop
+        return;
+    }
+    running_ = false;
+    {
+        std::lock_guard<std::mutex> lock(startMutex_);
+    }
+    startCv_.notify_all();
+    if (stopperThread_.joinable()) stopperThread_.join(); // previous one is done
+    // The capture threads iterate outputs_ lock-free, so outputs_ must not
+    // be touched (by a swap here, or by a new start()) until they are
+    // joined -- hence everything happens on the helper, and start() refuses
+    // while stopping_ is up.
+    stopperThread_ = std::thread([this]() {
+        if (starterThread_.joinable()) starterThread_.join();
+        for (auto& t : captureThreads_) {
+            if (t.joinable()) t.join();
+        }
+        captureThreads_.clear();
+        joinAndClearOutputs();
+        starting_ = false;
+        stopping_ = false; // last: readers may call start() right after
+    });
 }
 
 void AudioEngine::setLatencyMs(const std::wstring& outputId, int ms) {
@@ -424,15 +462,22 @@ void AudioEngine::resyncOutput(const std::wstring& outputId) {
 }
 
 void AudioEngine::setBaseCushionMs(int ms) {
-    g_baseCushionMs.store(std::clamp(ms, kMinBaseCushionMs, kMaxBaseCushionMs));
+    baseCushionMs_.store(std::clamp(ms, kMinBaseCushionMs, kMaxBaseCushionMs));
 }
 
 void AudioEngine::setDeviceFillMs(int ms) {
-    g_deviceFillMs.store(std::clamp(ms, kMinDeviceFillMs, kMaxDeviceFillMs));
+    deviceFillMs_.store(std::clamp(ms, kMinDeviceFillMs, kMaxDeviceFillMs));
 }
 
 void AudioEngine::setLowLatency(bool on) {
-    g_lowLatency.store(on);
+    lowLatency_.store(on);
+}
+
+void AudioEngine::setSpectrumTarget(const std::wstring& outputId) {
+    std::lock_guard<std::mutex> lock(outputsMutex_);
+    for (auto& state : outputs_) {
+        state->spectrumEnabled = (state->deviceId == outputId);
+    }
 }
 
 void AudioEngine::resyncAllOutputs() {
@@ -453,46 +498,72 @@ std::vector<OutputStatus> AudioEngine::getStatus() {
         s.sourcePid = state->sourcePid;
         s.underruns = state->underruns.load();
         s.driftCorrections = state->driftCorrections.load();
-        s.peak = state->peakMilli.exchange(0) / 1000.0;
         s.deviceLagMs = state->deviceLagMs.load();
-        for (int b = 0; b < kSpectrumBandCount; ++b) {
-            s.spectrumBands[b] = state->spectrumMilli[b].exchange(0) / 1000.0;
-        }
         result.push_back(std::move(s));
     }
     return result;
 }
 
+void AudioEngine::resetCounters(const std::wstring& outputId) {
+    std::lock_guard<std::mutex> lock(outputsMutex_);
+    for (auto& state : outputs_) {
+        if (!outputId.empty() && state->deviceId != outputId) continue;
+        state->underruns = 0;
+        state->driftCorrections = 0;
+    }
+}
+
+std::vector<OutputPeaks> AudioEngine::takePeaks() {
+    std::vector<OutputPeaks> result;
+    std::lock_guard<std::mutex> lock(outputsMutex_);
+    for (auto& state : outputs_) {
+        OutputPeaks p;
+        p.deviceId = state->deviceId;
+        p.peak = state->peakMilli.exchange(0) / 1000.0;
+        for (int b = 0; b < kSpectrumBandCount; ++b) {
+            p.spectrumBands[b] = state->spectrumMilli[b].exchange(0) / 1000.0;
+        }
+        result.push_back(std::move(p));
+    }
+    return result;
+}
+
+void AudioEngine::joinIdentifyJobs(bool finishedOnly) {
+    std::lock_guard<std::mutex> lock(identifyMutex_);
+    for (auto it = identifyJobs_.begin(); it != identifyJobs_.end();) {
+        if (finishedOnly && !it->done->load()) { ++it; continue; }
+        if (it->thread.joinable()) it->thread.join();
+        it = identifyJobs_.erase(it);
+    }
+}
+
 void AudioEngine::identifyOutput(const std::wstring& deviceId) {
-    std::thread([deviceId]() {
+    joinIdentifyJobs(true); // reap the ones already done
+    auto done = std::make_shared<std::atomic<bool>>(false);
+    IdentifyJob job;
+    job.done = done;
+    job.thread = std::thread([deviceId, done]() {
+        // Flagged on every exit path (including the early returns below) so
+        // the next identifyOutput() can reap this thread.
+        struct Finish {
+            std::shared_ptr<std::atomic<bool>> flag;
+            ~Finish() { flag->store(true); }
+        } finish{ done };
         ComScope com;
         if (!com.ownsInit) return;
 
         auto enumerator = CreateDeviceEnumerator();
         if (!enumerator) return;
-        ComPtr<IMMDevice> device;
-        if (FAILED(enumerator->GetDevice(deviceId.c_str(), device.GetAddressOf()))) return;
-
-        ComPtr<IAudioClient> audioClient;
-        if (FAILED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
-                                     reinterpret_cast<void**>(audioClient.GetAddressOf())))) {
-            return;
-        }
-
-        WAVEFORMATEX* mixFormat = nullptr;
-        if (FAILED(audioClient->GetMixFormat(&mixFormat)) || !mixFormat) return;
-        if (!isSupportedFormat(mixFormat)) {
-            CoTaskMemFree(mixFormat);
-            return;
-        }
-        int channels = mixFormat->nChannels;
-        int sampleRate = mixFormat->nSamplesPerSec;
-        bool dstIsFloat = isFloatFormat(mixFormat);
+        SharedClient sc;
+        if (!OpenSharedClient(enumerator.Get(), deviceId, sc, L"identify")) return;
+        const int channels = sc.format.channels;
+        const int sampleRate = sc.format.rate;
+        IAudioClient* audioClient = sc.client.Get();
 
         constexpr REFERENCE_TIME kBufferDuration = 3'000'000; // 300ms, in 100ns units
-        HRESULT hr = audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, kBufferDuration, 0, mixFormat, nullptr);
-        CoTaskMemFree(mixFormat);
-        if (FAILED(hr)) return;
+        if (FAILED(audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, kBufferDuration, 0, sc.mix, nullptr))) {
+            return;
+        }
 
         ComPtr<IAudioRenderClient> renderClient;
         if (FAILED(audioClient->GetService(__uuidof(IAudioRenderClient),
@@ -512,6 +583,7 @@ void AudioEngine::identifyOutput(const std::wstring& deviceId) {
         if (FAILED(audioClient->Start())) return;
         double phase = 0.0;
         constexpr double kTwoPi = 2.0 * 3.14159265358979323846;
+        std::vector<float> tone;
         for (const auto& beep : beeps) {
             int framesTotal = sampleRate * beep.ms / 1000;
             int framesWritten = 0;
@@ -523,29 +595,113 @@ void AudioEngine::identifyOutput(const std::wstring& deviceId) {
                 if (framesAvailable == 0) { Sleep(5); continue; }
                 BYTE* buf = nullptr;
                 if (FAILED(renderClient->GetBuffer(framesAvailable, &buf))) break;
-                for (UINT32 f = 0; f < framesAvailable; ++f) {
-                    float sample = 0.0f;
-                    if (beep.freq > 0.0) {
-                        sample = 0.25f * static_cast<float>(std::sin(phase));
+                tone.assign(static_cast<size_t>(framesAvailable) * channels, 0.0f);
+                if (beep.freq > 0.0) {
+                    for (UINT32 f = 0; f < framesAvailable; ++f) {
+                        float sample = 0.25f * static_cast<float>(std::sin(phase));
                         phase += kTwoPi * beep.freq / sampleRate;
                         if (phase > kTwoPi) phase -= kTwoPi;
-                    }
-                    for (int c = 0; c < channels; ++c) {
-                        if (dstIsFloat) {
-                            reinterpret_cast<float*>(buf)[f * channels + c] = sample;
-                        } else {
-                            reinterpret_cast<int16_t*>(buf)[f * channels + c] =
-                                static_cast<int16_t>(sample * 32767.0f);
-                        }
+                        for (int c = 0; c < channels; ++c) tone[static_cast<size_t>(f) * channels + c] = sample;
                     }
                 }
+                FromFloat(tone.data(), tone.size(), sc.format, buf);
                 renderClient->ReleaseBuffer(framesAvailable, 0);
                 framesWritten += framesAvailable;
             }
         }
         Sleep(150); // let the tail actually finish playing before Stop() cuts it off
         audioClient->Stop();
-    }).detach();
+    });
+    std::lock_guard<std::mutex> lock(identifyMutex_);
+    identifyJobs_.push_back(std::move(job));
+}
+
+void AudioEngine::startMicMetering(const std::vector<std::wstring>& deviceIds) {
+    stopMicMetering();
+    auto bank = std::make_shared<std::vector<std::unique_ptr<MicMeterEntry>>>();
+    for (const auto& id : deviceIds) {
+        auto e = std::make_unique<MicMeterEntry>();
+        e->deviceId = id;
+        bank->push_back(std::move(e));
+    }
+    {
+        std::lock_guard<std::mutex> lock(micMeterMutex_);
+        micMeterBank_ = bank;
+    }
+    micMeterRun_ = true;
+    micMeterThread_ = std::thread([this, bank]() {
+        ComScope com;
+        if (!com.ownsInit) return;
+        auto enumerator = CreateDeviceEnumerator();
+        if (!enumerator) return;
+
+        struct Stream {
+            MicMeterEntry* entry = nullptr;
+            SharedClient sc;
+            ComPtr<IAudioCaptureClient> capture;
+        };
+        std::vector<Stream> streams;
+        for (auto& e : *bank) {
+            Stream s;
+            s.entry = e.get();
+            if (!OpenSharedClient(enumerator.Get(), e->deviceId, s.sc, L"VU micro")) continue;
+            if (FAILED(s.sc.client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0,
+                                               2'000'000 /*200ms*/, 0, s.sc.mix, nullptr))) continue;
+            if (FAILED(s.sc.client->GetService(__uuidof(IAudioCaptureClient),
+                                                reinterpret_cast<void**>(s.capture.GetAddressOf())))) {
+                continue;
+            }
+            if (FAILED(s.sc.client->Start())) continue;
+            streams.push_back(std::move(s));
+        }
+
+        // 50ms polling is plenty for a VU refreshed by the 250ms status
+        // timer, and the 200ms stream buffer never overflows between polls.
+        while (micMeterRun_.load()) {
+            for (auto& s : streams) {
+                float peak = 0.0f;
+                UINT32 packet = 0;
+                while (SUCCEEDED(s.capture->GetNextPacketSize(&packet)) && packet > 0) {
+                    BYTE* data = nullptr;
+                    UINT32 frames = 0;
+                    DWORD flags = 0;
+                    if (FAILED(s.capture->GetBuffer(&data, &frames, &flags, nullptr, nullptr))) break;
+                    if (!(flags & AUDCLNT_BUFFERFLAGS_SILENT) && data) {
+                        peak = std::max(peak, PeakAbs(data, static_cast<size_t>(frames) * s.sc.format.channels,
+                                                      s.sc.format));
+                    }
+                    s.capture->ReleaseBuffer(frames);
+                }
+                int milli = static_cast<int>(peak * 1000.0f);
+                int prev = s.entry->peakMilli.load();
+                while (milli > prev && !s.entry->peakMilli.compare_exchange_weak(prev, milli)) {}
+            }
+            Sleep(50);
+        }
+        for (auto& s : streams) s.sc.client->Stop();
+    });
+}
+
+void AudioEngine::stopMicMetering() {
+    micMeterRun_ = false;
+    if (micMeterThread_.joinable()) micMeterThread_.join();
+    std::lock_guard<std::mutex> lock(micMeterMutex_);
+    micMeterBank_.reset();
+}
+
+std::vector<std::pair<std::wstring, double>> AudioEngine::getMicPeaks() {
+    std::shared_ptr<std::vector<std::unique_ptr<MicMeterEntry>>> bank;
+    {
+        std::lock_guard<std::mutex> lock(micMeterMutex_);
+        bank = micMeterBank_;
+    }
+    std::vector<std::pair<std::wstring, double>> out;
+    if (!bank) return out;
+    out.reserve(bank->size());
+    for (auto& e : *bank) {
+        out.emplace_back(e->deviceId, e->peakMilli.exchange(0) / 1000.0);
+    }
+    return out;
 }
 
 namespace {
@@ -575,7 +731,6 @@ void AudioEngine::captureThreadProc(std::wstring sourceId, bool loopback, std::w
     ComScope com;
     TimerResolutionScope timerRes;
     HANDLE mmcssHandle = EnableProAudioMmcss();
-    const bool processMode = (sourcePid != 0);
 
     bool firstSession = true;
     while (running_.load()) {
@@ -583,10 +738,9 @@ void AudioEngine::captureThreadProc(std::wstring sourceId, bool loopback, std::w
                                                   sourcePid, firstSession);
         if (end == CaptureSessionEnd::Stopped || !running_.load()) break;
         if (firstSession && end == CaptureSessionEnd::InitFailed) {
-            // The first session failing to init still fails the whole group
-            // start, exactly as before -- the starter's fail-fast window
-            // checks captureInitFails_.
-            captureInitFails_.fetch_add(1);
+            // The first session failing to init fails the whole group start:
+            // runCaptureSession already reported it to the starter, which is
+            // about to tear everything down -- nothing to retry here.
             markSourceLost(sourcePid, true);
             break;
         }
@@ -595,12 +749,12 @@ void AudioEngine::captureThreadProc(std::wstring sourceId, bool loopback, std::w
         // Mid-session loss: only THIS source's outputs go quiet (silence +
         // « source perdue » in the UI); the rest of the group keeps playing.
         markSourceLost(sourcePid, true);
-        if (processMode && !ProcessStillAlive(sourcePid)) {
+        if (sourcePid != 0 && !ProcessStillAlive(sourcePid)) {
             LOG_WARN(L"L'application capturée (PID " + std::to_wstring(sourcePid) +
                      L") s'est terminée : ses sorties passent en silence, le reste du groupe continue.");
             break; // a PID never comes back -- stays marked until stop()
         }
-        LOG_WARN(processMode
+        LOG_WARN(sourcePid != 0
             ? L"Capture de l'application (PID " + std::to_wstring(sourcePid) +
                   L") perdue — nouvelle tentative dans 2 s."
             : L"Capture système perdue — nouvelle tentative dans 2 s.");
@@ -615,12 +769,16 @@ AudioEngine::CaptureSessionEnd AudioEngine::runCaptureSession(
         const std::wstring& masterVolumeDeviceId,
         unsigned long sourcePid, bool firstSession) {
     ComPtr<IMMDeviceEnumerator> enumerator;
-    ComPtr<IMMDevice> device;
+    SharedClient sc; // device mode only
     ComPtr<IAudioClient> audioClient;
     ComPtr<IAudioCaptureClient> captureClient;
-    WAVEFORMATEX* mixFormat = nullptr;
+    StreamFormat srcFmt;
     HANDLE captureEvent = nullptr;
-    const bool processMode = (sourcePid != 0);
+    // Process loopback serves two sources: one app's tree (sourcePid), or --
+    // "no cable" mode -- everything except this process's own tree, which
+    // is how the whole system can be captured without a virtual device.
+    const bool excludeSelf = (sourcePid == 0 && systemExcludeSelf_);
+    const bool processMode = (sourcePid != 0) || excludeSelf;
     bool ok = false;
 
     // Process loopback has no GetMixFormat -- the caller dictates the format.
@@ -641,9 +799,11 @@ AudioEngine::CaptureSessionEnd AudioEngine::runCaptureSession(
             // process-loopback device (Windows 10 2004+).
             AUDIOCLIENT_ACTIVATION_PARAMS activationParams = {};
             activationParams.ActivationType = AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK;
-            activationParams.ProcessLoopbackParams.TargetProcessId = static_cast<DWORD>(sourcePid);
-            activationParams.ProcessLoopbackParams.ProcessLoopbackMode =
-                PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE;
+            activationParams.ProcessLoopbackParams.TargetProcessId =
+                excludeSelf ? GetCurrentProcessId() : static_cast<DWORD>(sourcePid);
+            activationParams.ProcessLoopbackParams.ProcessLoopbackMode = excludeSelf
+                ? PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE
+                : PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE;
             PROPVARIANT activateParams = {};
             activateParams.vt = VT_BLOB;
             activateParams.blob.cbSize = sizeof(activationParams);
@@ -672,17 +832,16 @@ AudioEngine::CaptureSessionEnd AudioEngine::runCaptureSession(
                                                 AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
                                                 200000, 0, &processFmt, nullptr))) break;
             if (FAILED(audioClient->SetEventHandle(captureEvent))) break;
+            srcFmt = DescribeFormat(&processFmt);
         } else {
-            if (FAILED(enumerator->GetDevice(sourceId.c_str(), device.GetAddressOf()))) break;
-            if (FAILED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
-                                         reinterpret_cast<void**>(audioClient.GetAddressOf())))) break;
-            if (FAILED(audioClient->GetMixFormat(&mixFormat))) break;
-            if (!isSupportedFormat(mixFormat)) break;
+            if (!OpenSharedClient(enumerator.Get(), sourceId, sc, L"capture système")) break;
+            audioClient = sc.client;
+            srcFmt = sc.format;
 
             DWORD streamFlags = loopback ? AUDCLNT_STREAMFLAGS_LOOPBACK : 0;
             REFERENCE_TIME bufferDuration = 1500000; // 150ms: margin for the polling loop under CPU load
             if (FAILED(audioClient->Initialize(AUDCLNT_SHAREMODE_SHARED, streamFlags,
-                                                bufferDuration, 0, mixFormat, nullptr))) break;
+                                                bufferDuration, 0, sc.mix, nullptr))) break;
         }
         if (FAILED(audioClient->GetService(__uuidof(IAudioCaptureClient),
                                             reinterpret_cast<void**>(captureClient.GetAddressOf())))) break;
@@ -691,13 +850,15 @@ AudioEngine::CaptureSessionEnd AudioEngine::runCaptureSession(
     } while (false);
 
     if (!ok) {
-        LOG_ERROR(processMode
+        LOG_ERROR(sourcePid != 0
             ? L"Capture par application (PID " + std::to_wstring(sourcePid) + L") impossible à démarrer."
-            : L"Capture système (câble virtuel) impossible à démarrer.");
-        if (mixFormat) CoTaskMemFree(mixFormat);
+            : excludeSelf ? L"Capture système sans câble (process loopback) impossible à démarrer."
+                          : L"Capture système (câble virtuel) impossible à démarrer.");
         if (captureEvent) CloseHandle(captureEvent);
+        if (firstSession) reportCaptureInit(false);
         return CaptureSessionEnd::InitFailed;
     }
+    if (firstSession) reportCaptureInit(true);
 
     // Follow the Windows-controlled volume/mute of the virtual cable's render
     // endpoint so the system volume control still does something -- purely
@@ -716,20 +877,8 @@ AudioEngine::CaptureSessionEnd AudioEngine::runCaptureSession(
         volCallbackRegistered = SUCCEEDED(endpointVolume->RegisterControlChangeNotify(&volCallback));
     }
 
-    bool srcIsFloat;
-    int srcChannels, srcRate;
-    if (processMode) {
-        srcIsFloat = true;
-        srcChannels = processFmt.nChannels;
-        srcRate = static_cast<int>(processFmt.nSamplesPerSec);
-    } else {
-        srcIsFloat = isFloatFormat(mixFormat);
-        srcChannels = mixFormat->nChannels;
-        srcRate = mixFormat->nSamplesPerSec;
-        CoTaskMemFree(mixFormat);
-        mixFormat = nullptr;
-    }
-
+    const int srcChannels = srcFmt.channels;
+    const int srcRate = srcFmt.rate;
 
     // Output formats are known here: start() waits for every render thread's
     // formatReady before spawning this thread. Only this source's outputs
@@ -754,6 +903,68 @@ AudioEngine::CaptureSessionEnd AudioEngine::runCaptureSession(
     std::vector<float> floatBuf;
     std::vector<float> converted;
 
+    // Pushes one chunk of source audio through every output fed by this
+    // source: resample/remap into the output's format, write it to the ring
+    // (whole frames only), then service any pad request from the render
+    // thread -- this capture thread is each ring's sole writer.
+    // outputs_ is stable here: it is only modified in start()/stop()/
+    // failStart(), with every capture thread joined first. Individual
+    // settings are std::atomic, making lock-free iteration safe.
+    auto feedOutputs = [&](const float* data, UINT32 frames) {
+        for (auto& out : outputs_) {
+            if (out->sourcePid != sourcePid) continue; // fed by another capture thread
+            // A render reconnect session may have landed on a different
+            // mix format; this thread owns the resampler, so the
+            // reconfiguration happens here.
+            if (out->formatDirty.exchange(false)) {
+                out->resampler.configure(srcChannels, srcRate,
+                                         out->channels.load(), out->sampleRate.load());
+            }
+            const size_t outCh = static_cast<size_t>(out->channels.load());
+            out->resampler.setSpeedAdjustment(out->speedAdjustment.load());
+            out->resampler.process(data, frames, out->channelMode.load(), converted);
+            // A short write means the ring was too full to take everything
+            // (render thread stalled for seconds: frozen Bluetooth link,
+            // device gone) -- force a resync instead of silently discarding
+            // the tail every packet. Counted once per episode, and only for
+            // a live output: a disconnected one would otherwise rack up a
+            // hundred "corrections" per second until it comes back.
+            size_t written = out->ring->writeAligned(converted.data(), converted.size(), outCh);
+            if (written < converted.size()) {
+                if (!out->ringOverflow.exchange(true) && out->active.load()) {
+                    out->driftCorrections.fetch_add(1);
+                }
+                out->forceResync = true;
+            }
+
+            // Service any pad request from the render thread here, since
+            // this (capture) thread is the ring's only legitimate writer.
+            size_t pad = out->silencePadFrames.exchange(0);
+            if (pad > 0) out->ring->writeSilenceAligned(pad, outCh);
+        }
+    };
+
+    // Process loopback delivers nothing at all while the captured app is
+    // silent (a device loopback keeps streaming zeros instead), so the rings
+    // would drain and every render callback would count an underrun -- and
+    // the drift controller would then pad them back, logging "corrections"
+    // for what is just a paused song. Top each ring back up to its cushion
+    // target with silence instead: no glitch counted, and the latency
+    // alignment is intact when the audio resumes. Reading the ring's fill
+    // level from the writer side is safe (SPSC).
+    auto topUpRingsWithSilence = [&]() {
+        for (auto& out : outputs_) {
+            if (out->sourcePid != sourcePid) continue;
+            const int channels = out->channels.load();
+            size_t target = CushionSamples(baseCushionMs_.load(), out->latencyMs.load(),
+                                           out->sampleRate.load(), channels);
+            size_t avail = out->ring->availableToRead();
+            if (avail < target) {
+                out->ring->writeSilenceAligned(target - avail, static_cast<size_t>(channels));
+            }
+        }
+    };
+
     CaptureSessionEnd end = CaptureSessionEnd::Stopped;
     while (running_.load()) {
         UINT32 packetLength = 0;
@@ -774,50 +985,12 @@ AudioEngine::CaptureSessionEnd AudioEngine::runCaptureSession(
             floatBuf.resize(static_cast<size_t>(numFrames) * srcChannels);
             if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
                 std::fill(floatBuf.begin(), floatBuf.end(), 0.0f);
-            } else if (srcIsFloat) {
-                memcpy(floatBuf.data(), data, floatBuf.size() * sizeof(float));
             } else {
-                const int16_t* src = reinterpret_cast<const int16_t*>(data);
-                for (size_t i = 0; i < floatBuf.size(); ++i) {
-                    floatBuf[i] = src[i] / 32768.0f;
-                }
+                ToFloat(data, floatBuf.size(), srcFmt, floatBuf.data());
             }
 
             captureClient->ReleaseBuffer(numFrames);
-
-            // outputs_ is stable and only modified/cleared in start()/stop()
-            // while this thread is not running or has been joined.
-            // Individual state settings are std::atomic, making lock-free iteration safe.
-            for (auto& out : outputs_) {
-                if (out->sourcePid != sourcePid) continue; // fed by another capture thread
-                // A render reconnect session may have landed on a different
-                // mix format; this thread owns the resampler, so the
-                // reconfiguration happens here.
-                if (out->formatDirty.exchange(false)) {
-                    out->resampler.configure(srcChannels, srcRate,
-                                             out->channels.load(), out->sampleRate.load());
-                }
-                out->resampler.setSpeedAdjustment(out->speedAdjustment.load());
-                out->resampler.process(floatBuf.data(), numFrames,
-                                       out->channelMode.load(), converted);
-                // A short write means the ring was too full to take
-                // everything (render thread stalled for seconds, e.g. a
-                // frozen Bluetooth link) -- force an immediate resync instead
-                // of silently discarding the tail every packet.
-                size_t written = out->ring->write(converted.data(), converted.size());
-                if (written < converted.size()) {
-                    out->driftCorrections.fetch_add(1);
-                    out->forceResync = true;
-                }
-
-                // Service any pad request from the render thread here, since
-                // this (capture) thread is the ring's only legitimate writer.
-                size_t pad = out->silencePadFrames.exchange(0);
-                if (pad > 0) {
-                    size_t padded = out->ring->writeSilence(pad);
-                    if (padded < pad) out->driftCorrections.fetch_add(1);
-                }
-            }
+            feedOutputs(floatBuf.data(), numFrames);
 
             if (FAILED(captureClient->GetNextPacketSize(&packetLength))) {
                 end = CaptureSessionEnd::Lost;
@@ -827,9 +1000,11 @@ AudioEngine::CaptureSessionEnd AudioEngine::runCaptureSession(
         if (end == CaptureSessionEnd::Lost) break;
 
         if (processMode) {
-            // Signaled once per period while the app plays; the timeout keeps
-            // the loop (and the mute enforcement) alive during silence.
-            WaitForSingleObject(captureEvent, 200);
+            // Signaled once per period while the app plays; a timeout means
+            // the app has gone quiet (see topUpRingsWithSilence).
+            if (WaitForSingleObject(captureEvent, kProcessIdleWaitMs) == WAIT_TIMEOUT) {
+                topUpRingsWithSilence();
+            }
         } else {
             Sleep(10);
         }
@@ -871,62 +1046,14 @@ void AudioEngine::renderThreadProc(OutputState* state) {
     if (mmcssHandle) AvRevertMmThreadCharacteristics(mmcssHandle);
 }
 
-namespace {
-
-// Initializes an event-driven shared-mode render stream. When low-latency
-// mode is on and the driver exposes IAudioClient3, requests its minimum
-// engine period (often ~2.7ms / 128 frames vs. the classic ~10ms) so
-// callbacks come faster and the device-buffer floor is smaller. Returns the
-// negotiated buffer size in *bufferFrames. Falls back to the classic 150ms
-// Initialize on any failure -- many drivers report no sub-10ms period, and
-// InitializeSharedAudioStream is picky about the exact engine format.
-// `label` is just for the log line.
-bool InitLowLatencyRender(IAudioClient* client, const WAVEFORMATEX* fmt, HANDLE evt,
-                          UINT32* bufferFrames, const std::wstring& label) {
-    if (g_lowLatency.load()) {
-        ComPtr<IAudioClient3> client3;
-        if (SUCCEEDED(client->QueryInterface(__uuidof(IAudioClient3),
-                                             reinterpret_cast<void**>(client3.GetAddressOf())))) {
-            UINT32 def = 0, fundamental = 0, minPeriod = 0, maxPeriod = 0;
-            if (SUCCEEDED(client3->GetSharedModeEnginePeriod(fmt, &def, &fundamental,
-                                                             &minPeriod, &maxPeriod)) &&
-                minPeriod > 0 && minPeriod < def) {
-                HRESULT hr = client3->InitializeSharedAudioStream(
-                    AUDCLNT_STREAMFLAGS_EVENTCALLBACK, minPeriod, fmt, nullptr);
-                if (SUCCEEDED(hr) && SUCCEEDED(client->SetEventHandle(evt)) &&
-                    SUCCEEDED(client->GetBufferSize(bufferFrames))) {
-                    LOG_INFO(L"Basse latence OK sur " + label + L" : période " +
-                             std::to_wstring(minPeriod) + L" trames (défaut " +
-                             std::to_wstring(def) + L"), tampon " + std::to_wstring(*bufferFrames));
-                    return true;
-                }
-                LOG_WARN(L"Basse latence refusée sur " + label + L" (" + log_detail::Hr(hr) +
-                         L") — repli sur le mode standard.");
-            }
-        }
-    }
-    // Classic path: 150ms allocation, only the fill target kept queued.
-    HRESULT hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-                                    1500000, 0, fmt, nullptr);
-    if (FAILED(hr)) {
-        LOG_ERROR(L"Initialize (rendu) a échoué sur " + label + L" : " + log_detail::Hr(hr));
-        return false;
-    }
-    if (FAILED(client->SetEventHandle(evt))) return false;
-    return SUCCEEDED(client->GetBufferSize(bufferFrames));
-}
-
-} // namespace
-
 AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, bool firstSession) {
     ComPtr<IMMDeviceEnumerator> enumerator;
-    ComPtr<IMMDevice> device;
-    ComPtr<IAudioClient> audioClient;
+    SharedClient sc;
+    IAudioClient* audioClient = nullptr; // = sc.client once opened
     ComPtr<IAudioRenderClient> renderClient;
     ComPtr<IAudioClock> audioClock;
     UINT64 clockFreq = 0;
     UINT64 framesWritten = 0; // total frames submitted this session
-    WAVEFORMATEX* mixFormat = nullptr;
     UINT32 bufferFrameCount = 0;
     // Auto-reset: WASAPI signals it once per device period (~10ms) when
     // buffer space is available, replacing the old Sleep(5) polling loop.
@@ -937,23 +1064,14 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
         if (!renderEvent) break;
         enumerator = CreateDeviceEnumerator();
         if (!enumerator) break;
-        HRESULT hrGet = enumerator->GetDevice(state->deviceId.c_str(), device.GetAddressOf());
-        if (FAILED(hrGet)) { LOG_ERROR(L"GetDevice (rendu) : " + log_detail::Hr(hrGet)); break; }
-        HRESULT hrAct = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
-                                         reinterpret_cast<void**>(audioClient.GetAddressOf()));
-        if (FAILED(hrAct)) { LOG_ERROR(L"Activate IAudioClient (rendu) : " + log_detail::Hr(hrAct)); break; }
-        if (FAILED(audioClient->GetMixFormat(&mixFormat))) break;
-        if (!isSupportedFormat(mixFormat)) {
-            LOG_WARN(L"Format non géré sur une sortie (bits/éch = " +
-                     std::to_wstring(mixFormat->wBitsPerSample) + L") — sortie ignorée.");
-            break;
-        }
+        if (!OpenSharedClient(enumerator.Get(), state->deviceId, sc, L"rendu")) break;
+        audioClient = sc.client.Get();
 
-        state->channels = mixFormat->nChannels;
-        state->sampleRate = mixFormat->nSamplesPerSec;
+        state->channels = sc.format.channels;
+        state->sampleRate = sc.format.rate;
 
-        if (!InitLowLatencyRender(audioClient.Get(), mixFormat, renderEvent, &bufferFrameCount,
-                                  state->deviceId)) break;
+        if (!InitRenderStream(audioClient, sc.mix, renderEvent, lowLatency_.load(), &bufferFrameCount,
+                              state->deviceId)) break;
         if (FAILED(audioClient->GetService(__uuidof(IAudioRenderClient),
                                             reinterpret_cast<void**>(renderClient.GetAddressOf())))) break;
         // Best-effort: feeds the device-lag estimate used by auto-alignment.
@@ -965,15 +1083,15 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
         // allocation): anything above the target would just be extra
         // one-time latency that the capped fill loop then drains anyway.
         UINT32 prerollFrames = static_cast<UINT32>(
-            static_cast<int64_t>(g_deviceFillMs.load()) * mixFormat->nSamplesPerSec / 1000);
+            static_cast<int64_t>(deviceFillMs_.load()) * sc.format.rate / 1000);
         if (prerollFrames > bufferFrameCount) prerollFrames = bufferFrameCount;
         BYTE* data = nullptr;
         if (FAILED(renderClient->GetBuffer(prerollFrames, &data))) break;
         renderClient->ReleaseBuffer(prerollFrames, AUDCLNT_BUFFERFLAGS_SILENT);
 
         if (firstSession) {
-            state->ring->writeSilence(CushionSamples(state->latencyMs.load(), state->sampleRate.load(),
-                                                       state->channels.load()));
+            state->ring->writeSilence(CushionSamples(baseCushionMs_.load(), state->latencyMs.load(),
+                                                       state->sampleRate.load(), state->channels.load()));
 
             // Only now is it safe for the capture thread to start writing to
             // this output's ring buffer: the pre-roll write above is done, so
@@ -989,8 +1107,8 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
             // silence, padded by the capture thread, the ring's sole writer.
             state->formatDirty = true;
             state->ring->drop(state->ring->availableToRead());
-            state->silencePadFrames.fetch_add(CushionSamples(state->latencyMs.load(), state->sampleRate.load(),
-                                                               state->channels.load()));
+            state->silencePadFrames.fetch_add(CushionSamples(baseCushionMs_.load(), state->latencyMs.load(),
+                                                               state->sampleRate.load(), state->channels.load()));
         }
 
         if (FAILED(audioClient->Start())) break;
@@ -998,14 +1116,11 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
     } while (false);
 
     if (!ok) {
-        if (mixFormat) CoTaskMemFree(mixFormat);
         if (renderEvent) CloseHandle(renderEvent);
         return RenderSessionEnd::InitFailed;
     }
 
-    bool dstIsFloat = isFloatFormat(mixFormat);
-    CoTaskMemFree(mixFormat);
-    mixFormat = nullptr;
+    const StreamFormat dstFmt = sc.format;
 
     state->active = true;
     std::vector<float> scratch;
@@ -1067,7 +1182,7 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
         // glitch headroom. Read per callback so the Options slider applies
         // live (a resync then snaps the ring to the shifted total).
         UINT32 fillFrames = static_cast<UINT32>(
-            static_cast<int64_t>(g_deviceFillMs.load()) * state->sampleRate.load() / 1000);
+            static_cast<int64_t>(deviceFillMs_.load()) * state->sampleRate.load() / 1000);
         if (fillFrames > bufferFrameCount) fillFrames = bufferFrameCount;
         UINT32 framesAvailable = (padding < fillFrames) ? fillFrames - padding : 0;
 
@@ -1114,6 +1229,20 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
                     fadeInFramesRemaining = fadeInFramesTotal;
                 }
 
+                // EQ before the gain stage: a band boost on a loud passage is
+                // exactly what the soft clip after the gain has to catch.
+                for (int b = 0; b < kEqBandCount; ++b) {
+                    int db = state->eqDb[b].load();
+                    if (db != curEqDb[b]) {
+                        BiquadFilter::Type type = (b == 0) ? BiquadFilter::Type::LowShelf
+                                                 : (b == kEqBandCount - 1) ? BiquadFilter::Type::HighShelf
+                                                                           : BiquadFilter::Type::Peaking;
+                        eqFilters[b].configure(channels, state->sampleRate.load(), type, kEqBandFreqs[b], db);
+                        curEqDb[b] = db;
+                    }
+                    eqFilters[b].process(scratch.data(), framesAvailable);
+                }
+
                 int volPct = state->volumePercent.load();
                 // Virtual-cable drivers generally don't apply their own
                 // endpoint volume to the audio, which is why the Windows
@@ -1129,8 +1258,13 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
                 }
                 // Per-output mute rides the same smoothed gain as the volume
                 // slider, so muting fades over one buffer instead of clicking.
-                float ratio = state->muted.load() ? 0.0f : (volPct / 100.0f) * masterGain;
-                float targetGain = ratio * ratio; // quadratic curve for logarithmic perception
+                // The output's own percentage sits on a quadratic curve for
+                // logarithmic perception; the Windows master scalar is
+                // already perceptual (the endpoint's volume taper) and is
+                // applied linearly -- squaring it too made the group play
+                // at a quarter of native level with Windows at 50%.
+                float own = state->muted.load() ? 0.0f : volPct / 100.0f;
+                float targetGain = own * own * masterGain;
                 size_t frameCount = channels > 0 ? scratch.size() / channels : 0;
                 if (frameCount > 0) {
                     if (currentGain == targetGain) {
@@ -1152,47 +1286,47 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
                     }
                 }
 
-                for (int b = 0; b < kEqBandCount; ++b) {
-                    int db = state->eqDb[b].load();
-                    if (db != curEqDb[b]) {
-                        BiquadFilter::Type type = (b == 0) ? BiquadFilter::Type::LowShelf
-                                                 : (b == kEqBandCount - 1) ? BiquadFilter::Type::HighShelf
-                                                                           : BiquadFilter::Type::Peaking;
-                        eqFilters[b].configure(channels, state->sampleRate.load(), type, kEqBandFreqs[b], db);
-                        curEqDb[b] = db;
-                    }
-                    eqFilters[b].process(scratch.data(), framesAvailable);
-                }
-
-                if (channels != meterConfiguredChannels || sampleRate != meterConfiguredRate) {
-                    for (int b = 0; b < kSpectrumBandCount; ++b) {
-                        meterFilters[b].configure(channels, sampleRate, BiquadFilter::Type::BandPass,
-                                                   kSpectrumBandFreqs[b], 0.0);
-                    }
-                    meterConfiguredChannels = channels;
-                    meterConfiguredRate = sampleRate;
-                }
-                for (int b = 0; b < kSpectrumBandCount; ++b) {
-                    meterScratch.assign(scratch.begin(), scratch.end());
-                    meterFilters[b].process(meterScratch.data(), framesAvailable);
-                    float bpk = 0.0f;
-                    for (float s : meterScratch) {
-                        float a = s < 0 ? -s : s;
-                        if (a > bpk) bpk = a;
-                    }
-                    int bMilli = static_cast<int>((bpk > 1.0f ? 1.0f : bpk) * 1000.0f);
-                    int prevB = state->spectrumMilli[b].load();
-                    while (bMilli > prevB &&
-                           !state->spectrumMilli[b].compare_exchange_weak(prevB, bMilli)) {
-                    }
-                }
-
+                // Peak for the VU, then clip protection: whatever went past
+                // the knee (EQ boost on a hot passage) is soft-clipped here
+                // instead of handed to the Windows mixer to clip hard.
                 float pk = 0.0f;
                 for (float s : scratch) {
                     float a = s < 0 ? -s : s;
                     if (a > pk) pk = a;
                 }
-                int pkMilli = static_cast<int>((pk > 1.0f ? 1.0f : pk) * 1000.0f);
+                if (pk > kSoftClipKnee) {
+                    for (float& s : scratch) s = SoftClip(s);
+                    if (pk > 1.0f) pk = 1.0f;
+                }
+                int pkMilli = static_cast<int>(pk * 1000.0f);
+
+                // 10-band spectrum, only for the output whose EQ panel is on
+                // screen (see setSpectrumTarget): ten biquad passes over a
+                // copy of every callback is not worth paying for in the tray.
+                if (state->spectrumEnabled.load()) {
+                    if (channels != meterConfiguredChannels || sampleRate != meterConfiguredRate) {
+                        for (int b = 0; b < kSpectrumBandCount; ++b) {
+                            meterFilters[b].configure(channels, sampleRate, BiquadFilter::Type::BandPass,
+                                                       kSpectrumBandFreqs[b], 0.0);
+                        }
+                        meterConfiguredChannels = channels;
+                        meterConfiguredRate = sampleRate;
+                    }
+                    for (int b = 0; b < kSpectrumBandCount; ++b) {
+                        meterScratch.assign(scratch.begin(), scratch.end());
+                        meterFilters[b].process(meterScratch.data(), framesAvailable);
+                        float bpk = 0.0f;
+                        for (float s : meterScratch) {
+                            float a = s < 0 ? -s : s;
+                            if (a > bpk) bpk = a;
+                        }
+                        int bMilli = static_cast<int>((bpk > 1.0f ? 1.0f : bpk) * 1000.0f);
+                        int prevB = state->spectrumMilli[b].load();
+                        while (bMilli > prevB &&
+                               !state->spectrumMilli[b].compare_exchange_weak(prevB, bMilli)) {
+                        }
+                    }
+                }
                 // Atomic compare-exchange instead of load-then-store: the
                 // separate load/store raced with getStatus()'s exchange(0),
                 // letting a reset land in between and get clobbered by a
@@ -1202,15 +1336,7 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
                        !state->peakMilli.compare_exchange_weak(prevPeak, pkMilli)) {
                 }
 
-                if (dstIsFloat) {
-                    memcpy(buf, scratch.data(), scratch.size() * sizeof(float));
-                } else {
-                    int16_t* dst = reinterpret_cast<int16_t*>(buf);
-                    for (size_t i = 0; i < scratch.size(); ++i) {
-                        float v = std::clamp(scratch[i], -1.0f, 1.0f);
-                        dst[i] = static_cast<int16_t>(v * 32767.0f);
-                    }
-                }
+                FromFloat(scratch.data(), scratch.size(), dstFmt, buf);
                 renderClient->ReleaseBuffer(framesAvailable, 0);
                 framesWritten += framesAvailable;
             }
@@ -1228,7 +1354,8 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
             }
             int channels = state->channels.load();
             int sampleRate = state->sampleRate.load();
-            size_t targetSamples = CushionSamples(state->latencyMs.load(), sampleRate, channels);
+            size_t targetSamples = CushionSamples(baseCushionMs_.load(), state->latencyMs.load(),
+                                                  sampleRate, channels);
             size_t avail = state->ring->availableToRead();
 
             // Device-side lag estimate (submitted vs. actually played, as
@@ -1253,6 +1380,7 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
             // straight to the new target instead of drifting there at
             // ±0.15% -- a 200ms move would otherwise take over two minutes.
             if (state->forceResync.exchange(false)) {
+                state->ringOverflow = false; // next overflow episode counts again
                 if (avail > targetSamples) {
                     size_t drop = avail - targetSamples;
                     drop -= drop % channels;
@@ -1294,6 +1422,7 @@ AudioEngine::RenderSessionEnd AudioEngine::runRenderSession(OutputState* state, 
                 drop -= drop % channels;
                 if (drop > 0) {
                     state->ring->drop(drop);
+                    state->ringOverflow = false;
                     state->driftCorrections.fetch_add(1);
                     state->speedAdjustment.store(1.0);
                     // The very next read() jumps to a different point in the
