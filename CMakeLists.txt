@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 # The one place the version lives: generated into gen/version.h for the C++
 # side (Options window) and the resource script (VERSIONINFO).
-project(AudioLinker VERSION 1.1.0 LANGUAGES CXX RC)
+project(AudioLinker VERSION 1.2.0 LANGUAGES CXX RC)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -56,6 +56,7 @@ add_executable(AudioLinker WIN32
     src/Calibrator.cpp
     src/WasapiStream.cpp
     src/Config.cpp
+    src/CrashHandler.cpp
     src/Log.cpp
     assets/AudioLinker.rc
     # CMake merges .manifest sources into the exe's embedded manifest via
@@ -96,6 +97,7 @@ target_link_libraries(AudioLinker PRIVATE
     shell32
     dwmapi
     advapi32
+    dbghelp # MiniDumpWriteDump (crash reports)
     comdlg32 # GetSaveFileNameW/GetOpenFileNameW (Options: export/import config)
     shcore # GetDpiForMonitor (initial window size on the cursor's monitor)
     mmdevapi # ActivateAudioInterfaceAsync (process-loopback capture)

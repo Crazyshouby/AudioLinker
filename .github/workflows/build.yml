@@ -8,14 +8,51 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
 jobs:
   build:
     # Pinned (not windows-latest): the "Visual Studio 17 2022" generator needs
     # a VS 2022 instance on the image, which windows-latest no longer
     # guarantees since it moved to the 2025 image.
     runs-on: windows-2022
+    env:
+      # Optional code signing: add the repository secrets SIGN_PFX_BASE64
+      # (the .pfx, base64) and SIGN_PFX_PASSWORD, nothing else to change.
+      HAS_CERT: ${{ secrets.SIGN_PFX_BASE64 != '' }}
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+
+      # The version lives in CMakeLists.txt only. A release tag must match it
+      # (v1.2.0, or v1.2.0-rc1 for a pre-release of 1.2.0).
+      - name: Read version
+        id: ver
+        shell: pwsh
+        run: |
+          $cmake = Get-Content CMakeLists.txt -Raw
+          if ($cmake -notmatch 'project\(AudioLinker VERSION (\d+\.\d+\.\d+)') { throw 'Version introuvable dans CMakeLists.txt' }
+          $v = $Matches[1]
+          "version=$v" >> $env:GITHUB_OUTPUT
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $base = ($env:GITHUB_REF_NAME -replace '^v', '') -replace '-.*$', ''
+            if ($base -ne $v) { throw "Le tag $env:GITHUB_REF_NAME ne correspond pas à la version de CMakeLists.txt ($v)" }
+          }
+
+      # Generated files are committed: regenerating them must change nothing.
+      - name: Generated assets are up to date
+        shell: pwsh
+        run: |
+          python tools/gen_assets.py
+          python tools/make_notices.py
+          git diff --exit-code --ignore-cr-at-eol -- assets THIRD-PARTY-NOTICES.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Fichiers générés périmés : relancer tools/gen_assets.py et tools/make_notices.py' }
 
       # The vendored WebView2 (headers + x64 static loader) is committed, so
       # there's no NuGet restore step -- the tree builds as-is.
@@ -28,18 +65,99 @@ jobs:
       - name: Unit tests
         run: ctest --test-dir build -C Release --output-on-failure
 
-      - name: Upload build artifact
+      # Every window of the UI side by side in headless Chrome (installed on the
+      # runner), with a stubbed WebView2 bridge; fails on a script error.
+      - name: UI smoke test
+        run: python tools/ui_smoke.py build/gen/ui.gen.html
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Prepare code signing
+        if: env.HAS_CERT == 'true'
+        shell: pwsh
+        env:
+          SIGN_PFX_BASE64: ${{ secrets.SIGN_PFX_BASE64 }}
+          SIGN_PFX_PASSWORD: ${{ secrets.SIGN_PFX_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'sign.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGN_PFX_BASE64))
+          $tool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+                  Where-Object { $_.FullName -like '*\x64\*' } | Sort-Object FullName | Select-Object -Last 1
+          if (-not $tool) { throw 'signtool.exe introuvable' }
+          "AL_SIGN_ARGS=/f `"$pfx`" /p `"$env:SIGN_PFX_PASSWORD`" /tr http://timestamp.digicert.com /td sha256 /fd sha256" >> $env:GITHUB_ENV
+          "$($tool.DirectoryName)" >> $env:GITHUB_PATH
+          # the exe first (the installer then signs itself and its uninstaller)
+          & $tool.FullName sign /f $pfx /p $env:SIGN_PFX_PASSWORD /tr http://timestamp.digicert.com /td sha256 /fd sha256 build\Release\AudioLinker.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Signature de AudioLinker.exe échouée' }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          if ($env:HAS_CERT -eq 'true') { .\installer\build.ps1 -ExePath build\Release\AudioLinker.exe -Sign }
+          else { .\installer\build.ps1 -ExePath build\Release\AudioLinker.exe }
+
+      # What a user does: install silently, check the files, uninstall.
+      - name: Installer test (install, upgrade, uninstall)
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem installer\Output\AudioLinker-Setup-*.exe).FullName
+          $dir = Join-Path $env:RUNNER_TEMP 'AudioLinkerInstalled'
+          $a = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=`"$dir`"")
+          foreach ($pass in 1, 2) {   # 2 = upgrade over an existing install
+            $p = Start-Process $setup -ArgumentList $a -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "Installation (passage $pass) : code $($p.ExitCode)" }
+            if (-not (Test-Path "$dir\AudioLinker.exe")) { throw 'AudioLinker.exe absent après installation' }
+          }
+          $ver = (Get-Item "$dir\AudioLinker.exe").VersionInfo.FileVersion
+          if ($ver -ne '${{ steps.ver.outputs.version }}') { throw "Version installée $ver inattendue" }
+          $p = Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Désinstallation : code $($p.ExitCode)" }
+          Start-Sleep -Seconds 2
+          if (Test-Path "$dir\AudioLinker.exe") { throw 'AudioLinker.exe encore présent après désinstallation' }
+
+      - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: AudioLinker
+          name: AudioLinker-installer
+          path: |
+            installer/Output/AudioLinker-Setup-*.exe
+            installer/Output/AudioLinker-Setup-*.exe.sha256
+          if-no-files-found: error
+
+      - name: Upload portable exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: AudioLinker-portable
           path: build/Release/AudioLinker.exe
           if-no-files-found: error
 
-      # On a v* tag, publish the exe as a downloadable GitHub Release so
-      # people can grab it without compiling.
-      - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+  # On a v* tag: publish the installer (+ SHA-256) and the portable exe as a
+  # GitHub Release. A tag with a "-" (v1.2.0-rc1) is a pre-release.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          files: build/Release/AudioLinker.exe
+          path: dist
+          merge-multiple: true
+
+      - name: Portable exe name
+        run: mv dist/AudioLinker.exe "dist/AudioLinker-${{ needs.build.outputs.version }}-portable.exe"
+
+      - name: Checksums
+        run: cd dist && sha256sum "AudioLinker-${{ needs.build.outputs.version }}-portable.exe" >> "AudioLinker-Setup-${{ needs.build.outputs.version }}.exe.sha256" && cat *.sha256
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/AudioLinker-Setup-*.exe
+            dist/AudioLinker-Setup-*.exe.sha256
+            dist/AudioLinker-*-portable.exe
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

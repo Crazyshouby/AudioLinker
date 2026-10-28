@@ -421,6 +421,21 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 using namespace al;
 
+bool QuitRunningInstance(DWORD timeoutMs) {
+    HWND wnd = FindWindowW(L"AudioLinkerMainWindow", nullptr);
+    if (!wnd) return true; // nothing running
+    DWORD pid = 0;
+    GetWindowThreadProcessId(wnd, &pid);
+    HANDLE proc = pid ? OpenProcess(SYNCHRONIZE, FALSE, pid) : nullptr;
+    PostMessageW(wnd, WM_COMMAND, al::ID_TRAY_QUIT, 0);
+    bool gone = true;
+    if (proc) {
+        gone = WaitForSingleObject(proc, timeoutMs) == WAIT_OBJECT_0;
+        CloseHandle(proc);
+    }
+    return gone;
+}
+
 int RunApplication(HINSTANCE hInstance, int nCmdShow, bool startHidden, bool waitForPrevious) {
     LogInit();
     // Single instance: a second launch would mean two tray icons, hotkey

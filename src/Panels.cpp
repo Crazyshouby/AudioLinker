@@ -166,6 +166,12 @@ RECT InitialRect(PanelId id) {
     return ClampToWorkArea(r);
 }
 
+void DestroyPanelWindow(PanelId id);
+
+// The launcher is the app: without its page there is nothing to show. Any
+// other window that cannot be built just closes and says so.
+void PanelFailed(PanelId id);
+
 void WebViewFatalError(HWND hwnd) {
     MessageBoxW(hwnd,
         L"Impossible d'initialiser l'interface web (WebView2).\n\n"
@@ -182,11 +188,17 @@ void ResizeController(Panel& p) {
     p.ctl->put_Bounds(rc);
 }
 
-void SendActive(PanelId id) {
-    Panel& p = P(id);
-    if (!p.hwnd) return;
-    bool active = GetForegroundWindow() == p.hwnd || GetActiveWindow() == p.hwnd;
+// Whether the window is the active one comes from WM_ACTIVATE itself (asking
+// GetForegroundWindow() while the message is handled can still name the old one).
+void SendActive(PanelId id, bool active) {
+    if (!P(id).hwnd) return;
     PostToPanel(id, std::wstring(L"{\"type\":\"active\",\"value\":") + (active ? L"true" : L"false") + L"}");
+}
+
+// The primary mouse button, as the system maps it (GetAsyncKeyState reads the
+// physical buttons: with swapped buttons the primary one is the right one).
+bool PrimaryButtonDown() {
+    return (GetAsyncKeyState(GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON) & 0x8000) != 0;
 }
 
 // What a page can ask for: the chrome commands and the window commands. The
@@ -216,7 +228,7 @@ void CreatePanelWebView(PanelId id) {
                     return S_OK;
                 }
                 if (FAILED(result) || !controller) {
-                    WebViewFatalError(hwnd);
+                    PanelFailed(id);
                     return S_OK;
                 }
                 p.ctl = controller;
@@ -225,7 +237,7 @@ void CreatePanelWebView(PanelId id) {
                 // blank the first time the window appears).
                 controller->put_IsVisible(IsWindowVisible(hwnd));
                 if (FAILED(controller->get_CoreWebView2(p.wv.GetAddressOf())) || !p.wv) {
-                    WebViewFatalError(hwnd);
+                    PanelFailed(id);
                     return S_OK;
                 }
                 HardenWebView(p.wv.Get());
@@ -261,7 +273,7 @@ void CreatePanelWebView(PanelId id) {
                             if (!p.wv) return S_OK;
                             std::wstring html = LoadHtmlResource(Def(id).resId);
                             if (html.empty()) {
-                                WebViewFatalError(p.hwnd);
+                                PanelFailed(id);
                                 return S_OK;
                             }
                             p.wv->NavigateToString(html.c_str());
@@ -294,6 +306,17 @@ void DestroyPanelWindow(PanelId id) {
         p.hwnd = nullptr;
         DestroyWindow(h);
     }
+}
+
+void PanelFailed(PanelId id) {
+    if (id == PanelId::Launcher) {
+        WebViewFatalError(P(id).hwnd);
+        return;
+    }
+    LOG_ERROR(std::wstring(L"La fenêtre « ") + FromUtf8(Def(id).key) + L" » n'a pas pu être créée.");
+    P(id).wantOpen = false;
+    DestroyPanelWindow(id);
+    SendError(L"Une fenêtre n'a pas pu s'ouvrir (WebView2 a échoué). Voir le journal.");
 }
 
 LRESULT CALLBACK PanelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -383,9 +406,10 @@ bool PanelFromKey(const std::wstring& key, PanelId& out) {
 
 bool IsPanelOpen(PanelId id) {
     const Panel& p = P(id);
-    if (id == PanelId::Launcher) return p.hwnd && IsWindowVisible(p.hwnd);
     return p.hwnd && IsWindowVisible(p.hwnd);
 }
+
+bool IsPanelShaded(PanelId id) { return P(id).shaded; }
 
 bool IsLauncherHidden() { return g_trayHidden; }
 
@@ -455,9 +479,15 @@ void ClosePanel(PanelId id) {
     }
     Panel& p = P(id);
     if (id == PanelId::Options) StopHotkeyCapture();
-    SavePanelPlacements();
+    if (id == PanelId::Outputs) {
+        // Its page can no longer tell the engine to stop: the mic meters keep
+        // microphone streams open (Windows shows "microphone in use") and the
+        // spectrum is computed for a speaker nobody sees.
+        StopMicMetering();
+        g_engine.setSpectrumTarget(L"");
+    }
     p.wantOpen = false;
-    SavePanelPlacements();
+    SavePanelPlacements(); // the rect is read while the window still exists
     DestroyPanelWindow(id);
     if (g_mainWnd && IsWindowVisible(g_mainWnd)) SetForegroundWindow(g_mainWnd);
     SendState();
@@ -602,22 +632,33 @@ bool HandlePanelMessage(PanelId from, const std::wstring& cmd, const std::wstrin
     Panel& p = P(from);
     if (cmd == L"ready") {
         p.ready = true;
+        SendActive(from, p.hwnd && GetForegroundWindow() == p.hwnd);
+        if (p.shaded) PostToPanel(from, L"{\"type\":\"shade\",\"value\":true}");
+        if (from == PanelId::Launcher) {
+            // First-run work (autostart...) and the state itself live in the common handler.
+            for (const auto& m : p.pending) {
+                if (p.wv) p.wv->PostWebMessageAsJson(m.c_str());
+            }
+            p.pending.clear();
+            FlushPendingToasts();
+            return false;
+        }
+        SendStateTo(from);
+        if (from == PanelId::Journal) SendJournal(from);
+        // Commands queued while the window was opening (switch to the inputs
+        // tab, open the calibration...) need the state they act on.
         for (const auto& m : p.pending) {
             if (p.wv) p.wv->PostWebMessageAsJson(m.c_str());
         }
         p.pending.clear();
-        SendActive(from);
-        if (p.shaded) PostToPanel(from, L"{\"type\":\"shade\",\"value\":true}");
-        if (from == PanelId::Launcher) return false; // first-run work (autostart...) lives in the common handler
-        SendStateTo(from);
-        if (from == PanelId::Journal) SendJournal(from);
+        FlushPendingToasts();
         return true;
     }
     if (cmd == L"dragstart") {
         g_drag.active = false;
         // Only while the button is still down (the message crosses a process
         // boundary: a quick click can be over by the time it arrives).
-        if (!p.hwnd || !(GetAsyncKeyState(VK_LBUTTON) & 0x8000)) return true;
+        if (!p.hwnd || !PrimaryButtonDown()) return true;
         g_drag.active = true;
         g_drag.id = from;
         GetCursorPos(&g_drag.cursor0);
@@ -626,7 +667,7 @@ bool HandlePanelMessage(PanelId from, const std::wstring& cmd, const std::wstrin
     }
     if (cmd == L"dragmove") {
         if (!g_drag.active || g_drag.id != from || !p.hwnd) return true;
-        if (!(GetAsyncKeyState(VK_LBUTTON) & 0x8000)) { // release missed: stop following the cursor
+        if (!PrimaryButtonDown()) { // release missed: stop following the cursor
             g_drag.active = false;
             return true;
         }
@@ -646,7 +687,7 @@ bool HandlePanelMessage(PanelId from, const std::wstring& cmd, const std::wstrin
         return true;
     }
     if (cmd == L"resizewin") {
-        if (!p.hwnd || !Def(from).resizable || p.shaded || !(GetAsyncKeyState(VK_LBUTTON) & 0x8000)) return true;
+        if (!p.hwnd || !Def(from).resizable || p.shaded || !PrimaryButtonDown()) return true;
         ReleaseCapture();
         POINT pt;
         GetCursorPos(&pt);
@@ -697,6 +738,7 @@ void ShadePanel(PanelId id, int mode) {
     ApplyShade(id, want);
     PostToPanel(id, std::wstring(L"{\"type\":\"shade\",\"value\":") + (want ? L"true" : L"false") + L"}");
     SavePanelPlacements();
+    SendState(); // the other windows need to know (where a toast can appear)
 }
 
 // Window messages common to the launcher and the other windows (the
@@ -741,7 +783,7 @@ LRESULT PanelCommonProc(PanelId id, HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             if (p.ctl) p.ctl->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
             return 0;
         case WM_ACTIVATE:
-            SendActive(id);
+            SendActive(id, LOWORD(wParam) != WA_INACTIVE);
             // Alt-Tab away mid-capture: the hook would keep eating every
             // keystroke for whatever app is now in front.
             if (id == PanelId::Options && LOWORD(wParam) == WA_INACTIVE && g_hotkeyCaptureId) {

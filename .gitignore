@@ -22,3 +22,6 @@ build-*/
 
 # Python bytecode (tools/)
 __pycache__/
+
+# Installer output
+installer/Output/

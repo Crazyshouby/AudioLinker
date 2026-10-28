@@ -1706,8 +1706,9 @@ const lostSourceIds = new Set();
 const TOAST_ORDER = ["outputs", "setups", "journal", "levels", "options", "launcher"];
 function isToaster() {
   if (!PANEL || PANEL === "all") return true;
-  const open = state.panels || {};
-  for (const k of TOAST_ORDER) if (open[k]) return k === PANEL;
+  const open = state.panels || {}, shaded = state.panelsShaded || {};
+  // A rolled-up window cannot show a toast: same rule as PostToastTarget.
+  for (const k of TOAST_ORDER) if (open[k] && !shaded[k]) return k === PANEL;
   return PANEL === "launcher";
 }
 function toastOnce(...args) { if (isToaster()) toast(...args); }

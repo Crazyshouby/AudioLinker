@@ -6,7 +6,13 @@ Application Windows pour diffuser l'audio du PC sur **plusieurs sorties simultan
 
 ## Téléchargement
 
-L'exécutable prêt à l'emploi est publié dans les [Releases](https://github.com/Crazyshouby/AudioLinker/releases) (chaque version taguée `v*` déclenche une compilation automatique). Sinon, voir [Compilation](#compilation) ci-dessous.
+Dans les [Releases](https://github.com/Crazyshouby/AudioLinker/releases) (chaque version taguée `v*` déclenche une compilation automatique) :
+
+- **`AudioLinker-Setup-<version>.exe`** : l'installateur (recommandé). Il s'installe pour l'utilisateur courant, sans droits administrateur, crée les raccourcis, propose le démarrage avec Windows, installe le runtime WebView2 s'il manque, et se désinstalle proprement depuis « Applications installées ».
+- `AudioLinker-<version>-portable.exe` : l'exécutable seul, à lancer depuis n'importe quel dossier.
+- Les empreintes SHA-256 sont dans le fichier `.sha256` de la release.
+
+Tant que l'installateur n'est pas signé numériquement, SmartScreen peut afficher « Windows a protégé votre ordinateur » : cliquez sur « Informations complémentaires » puis « Exécuter quand même », après avoir vérifié l'empreinte SHA-256. Sinon, voir [Compilation](#compilation) ci-dessous.
 
 ## Fonctionnalités
 
@@ -24,11 +30,13 @@ L'exécutable prêt à l'emploi est publié dans les [Releases](https://github.c
 
 - Windows 10 2004+ ou Windows 11 (x64)
 - [VB-CABLE](https://vb-audio.com/Cable/) — le câble audio virtuel qui sert de point de capture système (sauf en mode sans câble, voir ci-dessous)
-- [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (préinstallé sur Windows 11)
+- [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (préinstallé sur Windows 11 ; l'installateur le télécharge sinon)
 
 ## Configuration
 
-Tout est dans `%APPDATA%\AudioLinker\config.json` (setups, enceintes, raccourcis, réglages, règles d'automatisation). Un ancien `%APPDATA%\AudioLinker.ini` est migré automatiquement au premier lancement et conservé en `.bak`. Export/import depuis la fenêtre Options (un `.json`, ou un ancien `.ini`). Le journal de diagnostic est dans `%LOCALAPPDATA%\AudioLinker\audiolinker.log`.
+Tout est dans `%APPDATA%\AudioLinker\config.json` (setups, enceintes, raccourcis, réglages, règles d'automatisation). Un ancien `%APPDATA%\AudioLinker.ini` est migré automatiquement au premier lancement et conservé en `.bak`. Export/import depuis la fenêtre Options (un `.json`, ou un ancien `.ini`). Le journal de diagnostic est dans `%LOCALAPPDATA%\AudioLinker\audiolinker.log` (il s'affiche aussi en direct dans la fenêtre Journal). En cas de plantage, un rapport `.dmp` est écrit dans `%LOCALAPPDATA%\AudioLinker\crash\` ; il reste sur votre machine, à joindre à un signalement si vous le souhaitez.
+
+`AudioLinker.exe --quit` arrête proprement l'instance en cours (groupe arrêté, sortie par défaut de Windows restaurée).
 
 ## Mode sans câble (expérimental)
 
@@ -48,6 +56,8 @@ ctest --test-dir build
 ```
 
 `build.cmd [tests]` fait la même chose dans `build-dev\` (pratique quand une instance tourne depuis `build\`). L'exécutable est autonome (`build\AudioLinker.exe`) : les pages de l'interface (WebView2) sont embarquées en ressources, le SDK WebView2 et nlohmann/json sont vendorés dans `third_party/`. La version est définie une seule fois, dans `project(VERSION …)` de `CMakeLists.txt`.
+
+**Installateur** : avec [Inno Setup 6](https://jrsoftware.org/isinfo.php) installé, `.\installer\build.ps1 -ExePath build\AudioLinker.exe` produit `installer\Output\AudioLinker-Setup-<version>.exe` et son SHA-256. La procédure complète de publication (recette, tag, signature de code) est dans [RELEASING.md](RELEASING.md).
 
 ## Architecture
 

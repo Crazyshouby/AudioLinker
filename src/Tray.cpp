@@ -150,8 +150,7 @@ void RestoreFromTray(HWND /*hwnd*/) {
     // PostJson -- so re-sync it now that someone can see it again, then
     // replay the toasts they missed.
     SendState();
-    for (const auto& j : g_pendingJson) PostToastTarget(j);
-    g_pendingJson.clear();
+    FlushPendingToasts();
 }
 
 } // namespace al

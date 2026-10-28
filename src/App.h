@@ -203,6 +203,7 @@ void ApplyFlatFrame(HWND hwnd);
 const char* PanelKey(PanelId id);
 bool PanelFromKey(const std::wstring& key, PanelId& out);
 bool IsPanelOpen(PanelId id);
+bool IsPanelShaded(PanelId id);
 bool IsLauncherHidden();
 bool AnyPanelVisible();
 // Called once the launcher's HWND exists: which windows were open last time.
@@ -326,6 +327,8 @@ void RepairAfterCrash();
 void PostJson(const json& j);
 void SendState();
 void SendStateTo(PanelId to);
+// Replays toasts that found no window to show them (see RememberHiddenToast).
+void FlushPendingToasts();
 void SendSources();
 void SendStatus();
 void SendPeaks();
