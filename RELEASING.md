@@ -55,7 +55,7 @@ Options (état des lieux du 28 octobre 2026, à reconfirmer auprès de chaque fo
 
 Recommandation : demander SignPath Foundation (gratuit, adapté à un projet MIT public), en parallèle d'une réflexion sur la structure juridique si une signature à votre nom est un jour nécessaire. Une fois le compte approuvé, l'intégration remplace l'étape « Prepare code signing » : l'action `signpath/github-action-submit-signing-request` signe d'abord `AudioLinker.exe`, puis l'installateur construit avec cet exécutable, en deux demandes de signature.
 
-En local, avec un certificat accessible à `signtool` : `$env:AL_SIGN_ARGS = '<arguments de signtool>'`, signer `AudioLinker.exe`, puis `.\installeruild.ps1 -ExePath build\AudioLinker.exe -Sign`.
+En local, avec un certificat accessible à `signtool` : `$env:AL_SIGN_ARGS = '<arguments de signtool>'`, signer `AudioLinker.exe`, puis `.\installerbuild.ps1 -ExePath build\AudioLinker.exe -Sign`.
 
 ### Soumission à Microsoft (faux positif Defender / réputation SmartScreen)
 
