@@ -150,8 +150,17 @@ jobs:
       - name: Portable exe name
         run: mv dist/AudioLinker.exe "dist/AudioLinker-${{ needs.build.outputs.version }}-portable.exe"
 
+      # One .sha256 for both files, in the format `sha256sum -c` reads; the
+      # check runs here, so a malformed file fails the release instead of
+      # reaching users.
       - name: Checksums
-        run: cd dist && sha256sum "AudioLinker-${{ needs.build.outputs.version }}-portable.exe" >> "AudioLinker-Setup-${{ needs.build.outputs.version }}.exe.sha256" && cat *.sha256
+        run: |
+          cd dist
+          sums="AudioLinker-Setup-${{ needs.build.outputs.version }}.exe.sha256"
+          sed -i 's/\r$//' "$sums"
+          sha256sum --binary "AudioLinker-${{ needs.build.outputs.version }}-portable.exe" >> "$sums"
+          cat "$sums"
+          sha256sum --check "$sums"
 
       - uses: softprops/action-gh-release@v2
         with:
