@@ -17,7 +17,9 @@ configure_file(cmake/version.h.in ${GEN_DIR}/version.h @ONLY)
 
 # Both WebView2 pages share common.css/common.js, inlined at build time so
 # the embedded pages stay self-contained (NavigateToString can't reference
-# files). Editing any input regenerates the page and rebuilds the exe.
+# files). fonts.css / lava.css / icons.js are generated assets (see
+# tools/gen_assets.py) inlined into those two. Editing any input regenerates
+# the page and rebuilds the exe.
 set(ASSETS ${CMAKE_CURRENT_SOURCE_DIR}/assets)
 foreach(page ui options)
     add_custom_command(
@@ -25,8 +27,10 @@ foreach(page ui options)
         COMMAND ${CMAKE_COMMAND}
             -DSRC=${ASSETS}/${page}.html -DDST=${GEN_DIR}/${page}.gen.html
             -DCSS=${ASSETS}/common.css -DJS=${ASSETS}/common.js
+            -DFONTS=${ASSETS}/fonts.css -DLAVA=${ASSETS}/lava.css -DICONS=${ASSETS}/icons.js
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/InlineAssets.cmake
         DEPENDS ${ASSETS}/${page}.html ${ASSETS}/common.css ${ASSETS}/common.js
+                ${ASSETS}/fonts.css ${ASSETS}/lava.css ${ASSETS}/icons.js
                 ${CMAKE_CURRENT_SOURCE_DIR}/cmake/InlineAssets.cmake
         COMMENT "Inlining common assets into ${page}.html"
         VERBATIM)

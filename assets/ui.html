@@ -5,127 +5,160 @@
 <title>AudioLinker</title>
 <style>
 /*@common.css@*/
-#app { display: flex; flex-direction: column; height: 100%; padding: 18px 20px 10px; gap: 14px; }
+#app { display: flex; flex-direction: column; height: 100%; padding: 14px 16px 10px; gap: 12px; }
+
+/* ---------- Windows: frame + title bar + recessed panel ---------- */
+/* Frame = four concentric lines (--ring); the title bar runs over it, full
+   width. The window that holds the focus is red (see setFocusWin()). */
+.win {
+  background: var(--frame); border: 1px solid #000; box-shadow: var(--ring), 4px 5px 0 rgba(0, 0, 0, 0.5);
+  display: flex; flex-direction: column; min-width: 0; padding: 0 5px 5px;
+}
+.tb {
+  flex: none; height: 21px; margin: 0 -5px 4px; display: flex; align-items: center; justify-content: center;
+  background: var(--title); border-bottom: 1px solid #000; color: var(--text); position: relative;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 28px; text-shadow: 0 1px 0 #000;
+}
+.cb {
+  flex: 1; min-height: 0; padding: 8px; background: var(--panel); display: flex; flex-direction: column;
+}
+.win.focus { background: #880000; box-shadow: var(--ring-focus), 4px 5px 0 rgba(0, 0, 0, 0.5); }
+.win.focus .tb { background: var(--title-focus); border-bottom-color: #440000; }
+
+/* Scroll bars: dark track, bevelled thumb, small arrow buttons. */
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-track { background: #333; box-shadow: inset 1px 0 0 #000; }
+::-webkit-scrollbar-thumb { background: var(--btn); border: 1px solid #000; border-radius: 2px; box-shadow: var(--bevel); }
+::-webkit-scrollbar-corner { background: #333; }
+::-webkit-scrollbar-button:single-button {
+  display: block; width: 11px; height: 11px; background-color: #3a3a3a; background-repeat: no-repeat; background-position: center;
+  border: 1px solid #000; box-shadow: var(--bevel);
+}
+::-webkit-scrollbar-button:vertical:start:decrement { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='5'%3E%3Cpath d='M0 5h7L3.5 0z' fill='%23fff'/%3E%3C/svg%3E"); }
+::-webkit-scrollbar-button:vertical:end:increment { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='5'%3E%3Cpath d='M0 0h7L3.5 5z' fill='%23fff'/%3E%3C/svg%3E"); }
+::-webkit-scrollbar-button:horizontal:start:decrement { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='5' height='7'%3E%3Cpath d='M5 0v7L0 3.5z' fill='%23fff'/%3E%3C/svg%3E"); }
+::-webkit-scrollbar-button:horizontal:end:increment { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='5' height='7'%3E%3Cpath d='M0 0v7l5-3.5z' fill='%23fff'/%3E%3C/svg%3E"); }
+
+/* Orbs: round status lamps (blue/green = ok, amber = busy, grey = off). */
+.orb {
+  width: 11px; height: 11px; border-radius: 50%; flex: none; background: radial-gradient(circle at 35% 30%, #8a8a8a, #3a3a3a 60%, #1c1c1c);
+}
+.orb.green { background: radial-gradient(circle at 35% 30%, #8af08a, #18a828 55%, #0a5a14); }
+.orb.amber { background: radial-gradient(circle at 35% 30%, #ffe090, #faa320 55%, #b05a00); }
 
 /* ---------- Header ---------- */
-header { display: flex; align-items: center; gap: 14px; flex: none; }
-.logo {
-  width: 40px; height: 40px; border-radius: 12px; flex: none;
-  background: var(--accent);
-  display: grid; place-items: center;
-}
-.logo svg { width: 22px; height: 22px; }
+header.win { flex: none; }
+.head-row { flex-direction: row; align-items: center; gap: 10px; padding: 6px 8px; }
+.logo { flex: none; }
 .brand { flex: 1; min-width: 0; }
-.brand h1 { font-size: 17px; font-weight: 600; letter-spacing: 0.2px; }
-.status { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); margin-top: 1px; }
-.status .dot {
-  width: 8px; height: 8px; border-radius: 50%; background: var(--faint);
-  transition: background 0.3s;
+/* Status readout: a black console strip with a red frame. */
+.status {
+  display: flex; align-items: center; gap: 8px; min-width: 0; background: var(--ink);
+  border: 2px solid var(--red-frame); padding: 5px 9px; color: var(--green);
+  font: 600 12px "Overpass Mono", Consolas, monospace; font-stretch: 100%;
 }
-.status.on .dot { background: var(--green); }
-.status.busy .dot { background: var(--warn); animation: pulse 1s ease-in-out infinite; }
-@keyframes pulse { 50% { opacity: 0.35; } }
+.status > span:last-child { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status .dot { width: 11px; height: 11px; border-radius: 50%; flex: none; background: radial-gradient(circle at 35% 30%, #8a8a8a, #3a3a3a 60%, #1c1c1c); }
+.status.on .dot { background: radial-gradient(circle at 35% 30%, #8af08a, #18a828 55%, #0a5a14); }
+.status.busy .dot { background: radial-gradient(circle at 35% 30%, #ffe090, #faa320 55%, #b05a00); animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.4; } }
 
-/* The one primary action: flat accent while stopped, neutral while running
+/* The one primary action: red bar while stopped, plain grey while running
    (stopping is the quiet, deliberate gesture). */
 #toggleBtn {
-  position: relative; border: 1px solid transparent; border-radius: 10px; padding: 10px 22px;
-  font: 600 14px "Segoe UI Variable Text", "Segoe UI", sans-serif; color: #fff;
-  background: var(--accent);
-  cursor: pointer; transition: background 0.15s, border-color 0.15s, filter 0.15s;
+  position: relative; font: inherit; font-weight: 700; color: #fff; cursor: pointer; min-width: 150px; height: 30px;
+  background: var(--btn); border: 1px solid #000; border-radius: 3px; padding: 0 16px;
+  /* The default button of a KDX dialog: red double ring around the bevel. */
+  box-shadow: var(--bevel), 0 0 0 1px #000, 0 0 0 2px #cc0000, 0 0 0 3px #880000, 0 0 0 4px #000;
+  margin: 0 4px;
 }
-#toggleBtn:hover { filter: brightness(1.12); }
-#toggleBtn:active { filter: brightness(0.92); }
-#toggleBtn:disabled { cursor: default; filter: saturate(0.4) brightness(0.8); }
-#toggleBtn.stop { background: var(--card-2); border-color: var(--border); color: var(--text); }
-#toggleBtn.stop:hover { filter: none; border-color: var(--accent); }
+#toggleBtn:hover { background: #3b3b3b; }
+#toggleBtn:active { background: #2a2a2a; }
+#toggleBtn:disabled { cursor: default; color: #7a7a7a; }
+#toggleBtn:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
+#toggleBtn.stop { box-shadow: var(--bevel); }
 #toggleBtn .spin {
-  display: none; width: 13px; height: 13px; border-radius: 50%;
+  display: none; width: 11px; height: 11px; border-radius: 50%;
   border: 2px solid rgba(255,255,255,0.35); border-top-color: #fff;
   animation: rot 0.8s linear infinite; margin-right: 8px; vertical-align: -2px;
 }
 @keyframes rot { to { transform: rotate(360deg); } }
 #toggleBtn.starting .spin { display: inline-block; }
 
+.icon-btn {
+  flex: none; width: 30px; height: 30px; cursor: pointer; display: grid; place-items: center; padding: 0;
+  background: var(--btn); border: 1px solid #000; border-radius: 3px; box-shadow: var(--bevel);
+}
+.icon-btn:hover { background: #3b3b3b; }
+.icon-btn:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
+.icon-btn.on { background: #2a2a2a; box-shadow: var(--bevel-down); }
+
 /* Persistent notice under the header (source lost, audio left the group...)
    -- unlike a toast, it stays as long as the condition does. */
 #banner {
-  display: flex; align-items: center; gap: 12px; flex: none;
-  background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--warn);
-  color: var(--text); border-radius: 10px; padding: 8px 14px; font-size: 13px;
+  display: flex; align-items: center; gap: 12px; flex: none; background: var(--ink);
+  border: 2px solid var(--red-frame); color: var(--warn); padding: 6px 11px;
+  font: 600 12px/1.4 "Overpass Mono", Consolas, monospace; font-stretch: 100%;
 }
 #banner[hidden] { display: none; }
 #banner .banner-text { flex: 1; min-width: 0; }
 #banner .ghost-btn { flex: none; }
 
-/* ---------- Cards ---------- */
+/* ---------- Layout ---------- */
 /* Two-column landscape layout: setups on the left, the (growable) speaker
    list -- with the selected speaker's sheet opened in place -- on the right. */
-main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
-#colLeft {
-  width: 340px; flex: none; display: flex; flex-direction: column; gap: 14px;
-  min-height: 0; overflow-y: auto; padding-right: 2px;
-}
-#colLeft::-webkit-scrollbar { width: 8px; }
-#colLeft::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-.card {
-  background: var(--card); border: 1px solid var(--border-soft); border-radius: 14px;
-  padding: 14px 16px; flex: none;
-}
-.card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.card-head h2, .card > h2 {
-  font-size: 11px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted);
-}
-.card > h2 { margin-bottom: 10px; }
+main { flex: 1; display: flex; flex-direction: row; gap: 12px; min-height: 0; }
+#colLeft { width: 340px; flex: none; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 
 /* ---------- Device list ---------- */
-#devicesCard { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 150px; }
-#deviceList, #inputList { flex: 1; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
-#devicesToolbar { flex: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-soft); flex-wrap: nowrap; }
+#devicesCard { flex: 1; min-width: 0; min-height: 150px; }
+#devicesCard > .cb { gap: 8px; }
+.list { flex: 1; min-height: 0; overflow-y: auto; background: var(--panel); border: 1px solid #000; box-shadow: 0 1px 0 #555; }
+#devicesToolbar { flex: none; flex-wrap: nowrap; }
 #devicesToolbar #sMasterVol { min-width: 0; }
-#deviceList::-webkit-scrollbar, #inputList::-webkit-scrollbar { width: 8px; }
-#deviceList::-webkit-scrollbar-thumb, #inputList::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-#deviceList::-webkit-scrollbar-thumb:hover, #inputList::-webkit-scrollbar-thumb:hover { background: var(--faint); }
+#devicesToolbar label { width: auto; flex: none; }
 
-/* Sorties / Entrées tabs in the devices card header */
-.seg-tabs {
-  display: flex; gap: 2px; flex: none; padding: 2px;
-  background: var(--card-2); border: 1px solid var(--border-soft); border-radius: 8px;
-}
+/* Sorties / Entrées tabs: two joined bevel buttons, the active one pressed. */
+.seg-tabs { display: flex; flex: none; gap: 0; }
 .seg-tab {
-  border: none; background: transparent; color: var(--muted); font: inherit;
-  font-size: 12px; padding: 3px 10px; border-radius: 6px; cursor: pointer;
-  transition: background 0.12s, color 0.12s;
+  font: inherit; font-weight: 700; color: var(--text); cursor: pointer; padding: 3px 14px; min-height: 22px;
+  background: var(--btn); border: 1px solid #000; box-shadow: var(--bevel);
 }
-.seg-tab:hover { color: var(--text); }
-.seg-tab.active { background: var(--card); color: var(--text); }
+.seg-tab:first-child { border-radius: 3px 0 0 3px; }
+.seg-tab:last-child { border-radius: 0 3px 3px 0; }
+.seg-tab:hover { background: #3b3b3b; }
+.seg-tab.active { background: #2a2a2a; box-shadow: var(--bevel-down); }
 
-/* INPUTS tab: round check (single choice) + hint line under the list */
+/* INPUTS tab: single choice + hint line under the list */
 .chk.radio .box { border-radius: 50%; }
-.badge.default { color: var(--green); border-color: rgba(61, 220, 132, 0.4); }
+.badge.default { color: var(--green); }
 #inputList input[type="range"] { flex: none; width: 84px; }
 #inputList .val { width: 44px; }
 #inputList .vu { flex: none; width: 64px; }
-.mic-mute { flex: none; padding: 4px 6px; }
-.mic-mute.on { color: var(--red); border-color: rgba(201, 67, 67, 0.45); }
+.mic-mute { flex: none; padding: 3px 5px; }
+.mic-mute.on { color: var(--red); }
 #inputsHint {
-  flex: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-soft);
-  color: var(--faint); font-size: 12px; line-height: 1.5;
+  flex: none; padding-top: 6px; border-top: 1px solid var(--line);
+  color: var(--faint); font-size: 11.5px; font-weight: 600; line-height: 1.5;
 }
-.empty { color: var(--faint); text-align: center; padding: 28px 0; font-size: 13px; }
+.empty { color: var(--faint); text-align: center; padding: 28px 12px; font-size: 12px; font-weight: 600; }
 
+/* Rows: ruled lines; hover = peach, selected = navy, custom colour = left bar. */
 .device {
-  display: flex; align-items: center; gap: 12px; padding: 9px 10px; border-radius: 10px;
-  border: 1px solid transparent; cursor: pointer; transition: background 0.12s, border-color 0.12s;
-  margin-bottom: 2px; outline: none;
+  display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 6px; border-left: 6px solid transparent;
+  border-bottom: 1px solid var(--line); cursor: pointer; outline: none;
 }
-.device:hover { background: var(--card-2); }
-.device:focus-visible { border-color: var(--accent); }
-/* Selection = neutral raised row + a bar in the speaker's colour (its own
-   colour if it has one, the accent otherwise). */
-.device.sel { background: var(--card-2); border-color: var(--border); box-shadow: inset 3px 0 0 var(--dev-color, var(--accent)); }
-.device.sel.open { border-bottom-left-radius: 0; border-bottom-right-radius: 0; margin-bottom: 0; border-bottom-color: transparent; }
+.device[style*="--dev-color"] { border-left-color: var(--dev-color); }
+.device:hover { background: var(--accent-2); color: var(--hover-fg); }
+.device:focus-visible { outline: 2px solid var(--warn); outline-offset: -2px; }
+.device.sel { background: var(--sel-bg); color: var(--sel-fg); }
+.device.is-muted { background: var(--away-bg); color: var(--faint); }
+.device.is-muted.sel { background: var(--sel-bg); }
+.device.sel.open { border-bottom-color: transparent; }
 .device.dragging { opacity: 0.4; }
+.device:hover .badge, .setup:hover .badge { color: var(--hover-fg); border-color: #c89060; background: #ffddb8; }
+.device:hover .grip, .setup:hover .setup-ico { color: var(--hover-fg); }
 
 .grip {
   flex: none; width: 12px; text-align: center; color: var(--faint);
@@ -135,313 +168,278 @@ main { flex: 1; display: flex; flex-direction: row; gap: 14px; min-height: 0; }
 .device:hover .grip { opacity: 1; }
 .grip:active { cursor: grabbing; }
 
-.chk { position: relative; flex: none; width: 19px; height: 19px; cursor: pointer; }
+.chk { position: relative; flex: none; width: 16px; height: 16px; cursor: pointer; }
 .chk input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
 .chk .box {
-  position: absolute; inset: 0; border-radius: 6px; border: 1.5px solid var(--faint);
-  background: transparent; transition: all 0.15s; pointer-events: none;
+  position: absolute; inset: 0; background: var(--ink); pointer-events: none;
+  border: 1px solid var(--lo); border-bottom-color: #5a5a5a; border-right-color: #5a5a5a;
 }
-.chk input:checked + .box { background: var(--dev-color, var(--accent)); border-color: var(--dev-color, var(--accent)); }
+.chk input:checked + .box { background: var(--bar); border-color: #000; border-bottom-color: #ff8a74; border-right-color: #ff8a74; }
 .chk .box::after {
-  content: ""; position: absolute; left: 5.5px; top: 2px; width: 5px; height: 9px;
+  content: ""; position: absolute; left: 4.5px; top: 1px; width: 4px; height: 8px;
   border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg) scale(0);
-  transition: transform 0.15s;
 }
 .chk input:checked + .box::after { transform: rotate(45deg) scale(1); }
+.chk input:focus-visible + .box { outline: 2px solid var(--warn); outline-offset: 1px; }
 
 .dev-main { flex: 1; min-width: 0; }
-.dev-name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.dev-kind { flex: none; display: grid; place-items: center; color: var(--muted); }
+.dev-name-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.dev-kind { flex: none; line-height: 0; }
 .dev-kind svg { display: block; }
-.dev-name { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.dev-name { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .device.is-muted .dev-name { color: var(--faint); }
+.device.sel .dev-name { color: var(--sel-fg); }
 .name-edit {
-  width: 100%; background: var(--card-2); border: 1px solid var(--accent); border-radius: 6px;
-  color: var(--text); font: 13px "Segoe UI Variable Text", "Segoe UI", sans-serif;
-  padding: 2px 7px; outline: none;
+  width: 100%; background: var(--ink); border: 2px solid var(--red-frame);
+  color: var(--green); font: 600 12px "Overpass Mono", Consolas, monospace; font-stretch: 100%;
+  padding: 2px 6px; outline: none; caret-color: #e83c3c;
 }
 .name-edit::placeholder { color: var(--faint); }
 
 /* Hover-only "identify" button on each speaker row (also in the menu). */
 .dev-id-btn {
-  flex: none; width: 26px; height: 26px; border-radius: 7px; border: 1px solid transparent;
-  background: transparent; color: var(--faint); cursor: pointer; display: grid; place-items: center;
-  opacity: 0; transition: opacity 0.12s, color 0.12s, border-color 0.12s;
+  flex: none; width: 24px; height: 22px; border: 1px solid transparent; background: transparent; cursor: pointer;
+  display: grid; place-items: center; opacity: 0; transition: opacity 0.12s;
 }
 .device:hover .dev-id-btn, .device:focus-within .dev-id-btn { opacity: 1; }
-.dev-id-btn:hover { color: var(--text); border-color: var(--border); }
+.dev-id-btn:hover { background: var(--btn); border-color: #000; box-shadow: var(--bevel); }
 
 /* ---------- Per-speaker context menu (identify / mute / color / automation) ---------- */
 #ctxMenu {
   position: fixed; z-index: 20; min-width: 240px; max-width: 340px; display: none;
-  background: var(--card-2); border: 1px solid var(--border); border-radius: 10px;
-  padding: 6px; box-shadow: 0 14px 44px rgba(0, 0, 0, 0.55);
+  background: var(--panel); border: 1px solid #000; box-shadow: var(--ring), 4px 5px 0 rgba(0, 0, 0, 0.5); padding: 6px;
 }
 #ctxMenu.show { display: block; }
 .ctx-title {
-  font-size: 10.5px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
-  color: var(--faint); padding: 5px 10px 7px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: 11px; color: var(--faint); padding: 4px 8px 6px; background: var(--title); margin: -6px -6px 4px; color: #fff; text-shadow: 0 1px 0 #000;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center;
 }
-.ctx-item {
-  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
-  border-radius: 7px; font-size: 13px; color: var(--text); cursor: pointer;
-}
-.ctx-item:hover { background: var(--hover); }
-.ctx-check { width: 14px; flex: none; color: var(--accent-2); text-align: center; }
+.ctx-item { display: flex; align-items: center; gap: 8px; padding: 5px 8px; font-size: 12px; color: var(--text); cursor: pointer; }
+.ctx-item:hover { background: var(--sel-bg); color: var(--sel-fg); }
+.ctx-check { width: 14px; flex: none; color: var(--green); text-align: center; }
 .ctx-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ctx-sep { height: 1px; background: var(--border-soft); margin: 5px 8px; }
+.ctx-sep { height: 1px; background: var(--line); margin: 4px 6px; }
 .ctx-auto { cursor: default; gap: 10px; }
-.ctx-auto:hover { background: transparent; }
-.ctx-auto-label { flex: none; width: 86px; font-size: 12.5px; color: var(--muted); }
-.ctx-select { flex: 1; min-width: 0; padding: 4px 8px; font-size: 12.5px; }
-.ctx-swatches { display: flex; flex-wrap: wrap; gap: 7px; padding: 2px 10px 8px; }
-.ctx-swatch {
-  width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; padding: 0;
-  cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
-}
-.ctx-swatch.sel { border-color: var(--text); }
-.ctx-swatch.none { background: var(--card); position: relative; }
+.ctx-auto:hover { background: transparent; color: var(--text); }
+.ctx-auto-label { flex: none; width: 86px; font-size: 12px; color: var(--muted); }
+.ctx-select { flex: 1; min-width: 0; padding: 3px 6px; font-size: 12px; }
+.ctx-swatches { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 8px 8px; }
+.ctx-swatch { width: 20px; height: 20px; border: 2px solid #000; padding: 0; cursor: pointer; box-shadow: 0 0 0 1px #5a5a5a; }
+.ctx-swatch.sel { border-color: #fff; }
+.ctx-swatch.none { background: var(--ink); position: relative; }
 .ctx-swatch.none::after {
-  content: ""; position: absolute; left: 3px; right: 3px; top: 50%; height: 1.5px;
-  background: var(--faint); transform: rotate(-45deg);
+  content: ""; position: absolute; left: 2px; right: 2px; top: 50%; height: 2px;
+  background: var(--red); transform: rotate(-45deg);
 }
 
-.dev-meta { display: flex; gap: 6px; margin-top: 3px; flex-wrap: wrap; }
+.dev-meta { display: flex; gap: 5px; margin-top: 3px; flex-wrap: wrap; }
 .badge {
-  font-size: 10.5px; color: var(--muted); background: var(--card-2);
-  border: 1px solid var(--border-soft); border-radius: 5px; padding: 1px 7px;
+  font: 600 10.5px/1.3 "Overpass Mono", Consolas, monospace; font-stretch: 100%; color: var(--muted);
+  background: #2a2a2a; border: 1px solid var(--lo); border-bottom-color: #5a5a5a; border-right-color: #5a5a5a; padding: 0 5px;
 }
-.badge.glitch { color: var(--warn); border-color: rgba(232, 163, 61, 0.4); }
-.badge.lost { color: var(--red); border-color: rgba(239, 111, 111, 0.4); }
-.badge.src { color: var(--accent-2); border-color: rgba(var(--accent-rgb), 0.4); }
+.badge.glitch { color: var(--warn); }
+.badge.lost { color: var(--red); }
+.badge.src { color: var(--accent-2); }
 .badge.lag { color: var(--faint); }
 
-.dev-right { flex: none; display: flex; align-items: center; gap: 10px; width: 120px; }
+.dev-right { flex: none; display: flex; align-items: center; gap: 8px; width: 120px; }
 .dev-right.wide { width: auto; } /* inputs rows: slider + value + mute + VU */
-.act-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); flex: none; transition: background 0.3s; }
-.device.active .act-dot { background: var(--green); }
-.vu { flex: 1; height: 6px; border-radius: 3px; background: var(--track-off); overflow: hidden; }
-.vu-fill {
-  height: 100%; width: 0%; border-radius: 3px;
-  background: var(--accent);
-  transition: width 0.08s linear;
-}
-.vu-fill.hot { background: linear-gradient(90deg, var(--warn), var(--red)); }
-
-/* ---------- Header icon button ---------- */
-.icon-btn {
-  flex: none; width: 40px; height: 40px; border-radius: 12px; cursor: pointer;
-  border: 1px solid var(--border-soft); background: var(--card); color: var(--muted);
-  display: grid; place-items: center; transition: color 0.15s, border-color 0.15s, background 0.15s;
-}
-.icon-btn:hover { color: var(--text); border-color: var(--accent); background: var(--hover); }
-.icon-btn.on { color: var(--red); border-color: var(--red); }
+.act-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: radial-gradient(circle at 35% 30%, #6a6a6a, #333 60%, #1c1c1c); }
+.device.active .act-dot { background: radial-gradient(circle at 35% 30%, #8af08a, #18a828 55%, #0a5a14); }
+/* Level meter: same bar as the transfer bars of KDX; amber near clipping. */
+.vu { flex: 1; height: 9px; background: var(--track-off); border: 1px solid #0c0c0c; overflow: hidden; }
+.vu-fill { height: 100%; width: 0%; background: var(--bar); transition: width 0.08s linear; }
+.vu-fill.hot { background: linear-gradient(#ffb347, #f58a1a 45%, #b85a00); }
 
 /* ---------- Modals ---------- */
 .modal {
   position: fixed; inset: 0; z-index: 15; display: grid; place-items: center;
-  background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(6px);
-  opacity: 0; pointer-events: none; transition: opacity 0.15s;
+  background: rgba(0, 0, 0, 0.6); opacity: 0; pointer-events: none; transition: opacity 0.15s;
 }
 .modal.show { opacity: 1; pointer-events: auto; }
 .modal-panel {
   width: 460px; max-width: calc(100vw - 40px); max-height: 80%; overflow-y: auto;
-  background: var(--card); border: 1px solid var(--border); border-radius: 16px;
-  padding: 18px; box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
-  transform: translateY(8px) scale(0.98); transition: transform 0.15s;
+  background: #880000; border: 1px solid #000; box-shadow: var(--ring-focus), 6px 8px 0 rgba(0, 0, 0, 0.55); padding: 0 5px 5px;
 }
-.modal.show .modal-panel { transform: none; }
-.modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-.modal-head h2 {
-  font-size: 14px; font-weight: 600; color: var(--text);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+.modal-head {
+  display: flex; align-items: center; justify-content: center; position: relative; height: 21px;
+  margin: 0 -5px 4px; background: var(--title-focus); border-bottom: 1px solid #440000;
 }
+.modal-head h2 { font-size: 12px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70%; }
 .modal-close {
-  flex: none; width: 28px; height: 28px; border: 0; border-radius: 8px; cursor: pointer;
-  background: transparent; color: var(--faint); font-size: 13px; line-height: 1;
-  transition: color 0.12s, background 0.12s;
+  position: absolute; left: 4px; top: 4px; width: 14px; height: 14px; border: 1px solid #fff; background: transparent;
+  color: #fff; font: 800 10px/1 "Archivo", sans-serif; cursor: pointer; padding: 0; display: grid; place-items: center;
 }
-.modal-close:hover { color: var(--text); background: var(--card-2); }
-.confirm-text { font-size: 13.5px; color: var(--muted); line-height: 1.5; user-select: none; }
+.modal-close:hover { background: #fff; color: #000; }
+.modal-body { background: var(--panel); padding: 12px; }
+.confirm-text { font-size: 12.5px; font-weight: 600; color: var(--muted); line-height: 1.5; user-select: none; }
 .confirm-text b { color: var(--text); }
-.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
-.confirm-actions .ghost-btn { padding: 8px 16px; font-size: 13px; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.confirm-actions .ghost-btn { padding: 5px 16px; }
 .danger-btn {
-  border: 0; border-radius: 8px; padding: 8px 18px; cursor: pointer;
-  font: 600 13px "Segoe UI Variable Text", "Segoe UI", sans-serif; color: #fff;
-  background: var(--red); transition: filter 0.15s;
+  font: inherit; font-weight: 700; color: #fff; cursor: pointer; padding: 5px 16px; min-height: 24px;
+  background: var(--btn); border: 1px solid #000; border-radius: 3px;
+  box-shadow: var(--bevel), 0 0 0 1px #000, 0 0 0 2px #cc0000, 0 0 0 3px #880000, 0 0 0 4px #000; margin: 0 4px;
 }
-.danger-btn:hover { filter: brightness(1.12); }
+.danger-btn:hover { background: #3b3b3b; }
 
-.row > label { width: 68px; flex: none; font-size: 13px; color: var(--muted); }
+.row > label { width: 68px; flex: none; color: var(--text); }
 
-.seg { display: flex; background: var(--card-2); border: 1px solid var(--border-soft); border-radius: 9px; padding: 3px; gap: 3px; }
+/* Segmented choice (channel): joined bevel buttons, the chosen one pressed. */
+.seg { display: flex; gap: 0; }
 .seg button {
-  border: 0; background: transparent; color: var(--muted); border-radius: 7px;
-  padding: 5px 16px; font: 12.5px "Segoe UI Variable Text", "Segoe UI", sans-serif;
-  cursor: pointer; transition: all 0.15s;
+  font: inherit; font-weight: 700; color: var(--text); cursor: pointer; padding: 3px 14px; min-height: 22px;
+  background: var(--btn); border: 1px solid #000; box-shadow: var(--bevel);
 }
-.seg button:hover { color: var(--text); }
-.seg button.on { background: var(--accent); color: #fff; }
+.seg button:first-child { border-radius: 3px 0 0 3px; }
+.seg button:last-child { border-radius: 0 3px 3px 0; }
+.seg button:hover { background: #3b3b3b; }
+.seg button.on { background: #2a2a2a; box-shadow: var(--bevel-down); }
 
 /* ---------- Speaker sheet (opens in place, under the selected row) ---------- */
 #sheet {
-  margin: 0 0 8px; padding: 12px 14px 14px;
-  background: var(--card-2);
-  border: 1px solid var(--border); border-top: 0;
-  box-shadow: inset 3px 0 0 var(--dev-color, var(--accent));
-  border-radius: 0 0 10px 10px; cursor: default;
+  margin: 4px 4px 8px; padding: 10px 12px 12px; background: var(--panel);
+  border: 1px solid #000; box-shadow: 0 1px 0 #555, inset 0 1px 0 #444; cursor: default; color: var(--text);
 }
 #sheet[hidden] { display: none; }
-#eqCurveWrap { position: relative; height: 130px; }
+#eqCurveWrap { position: relative; height: 130px; background: var(--ink); border: 2px solid var(--red-frame); }
 /* Live 10-band spectrum behind the curve, from AudioEngine's real per-band
    meter (see the JS comment above startEqFlow()) -- kept low-contrast so it
    sits strictly behind the curve/points instead of competing with them. */
 #eqFlow { position: absolute; inset: 0; height: 130px; display: block; pointer-events: none; }
 #eqCurve { position: absolute; inset: 0; display: block; touch-action: none; }
-.eq-zero-line { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 3; }
-.eq-fill { fill: var(--accent); opacity: 0.14; }
-.eq-path { fill: none; stroke: var(--accent); stroke-width: 2; }
-.eq-point { fill: #fff; stroke: var(--accent); stroke-width: 2.5; cursor: ns-resize; }
-.eq-point:hover, .eq-point.dragging { stroke: var(--accent-2); }
+.eq-zero-line { stroke: #5a5a5a; stroke-width: 1; stroke-dasharray: 3 3; }
+.eq-fill { fill: #e83c3c; opacity: 0.2; }
+.eq-path { fill: none; stroke: #e83c3c; stroke-width: 2; }
+.eq-point { fill: #c8c8c8; stroke: #000; stroke-width: 2; cursor: ns-resize; }
+.eq-point:hover, .eq-point.dragging { fill: #fff; }
 .eq-freq-label { fill: var(--faint); font-size: 10px; text-anchor: middle; }
-.eq-db-value { fill: var(--text); font-size: 10.5px; text-anchor: middle; font-variant-numeric: tabular-nums; }
-#eqControls { display: grid; gap: 12px; margin-top: 10px; grid-template-columns: 1fr 1fr; }
-#eqControls .row.wide { grid-column: 1 / -1; }
-.sheet-hint { font-size: 11.5px; color: var(--faint); margin-top: 2px; }
+.eq-db-value { fill: #00ff00; font: 600 10px "Overpass Mono", Consolas, monospace; text-anchor: middle; font-variant-numeric: tabular-nums; }
+#eqControls { display: grid; gap: 10px; margin-top: 10px; grid-template-columns: minmax(0, 1fr); }
+#eqControls > .row { min-width: 0; }
+.sheet-hint { font-size: 11px; font-weight: 600; color: var(--faint); margin-top: 2px; }
 
 /* ---------- Setups ---------- */
-#setupsCard { flex: 1; min-height: 150px; display: flex; flex-direction: column; }
-#setupList { flex: 1; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
-#setupList::-webkit-scrollbar { width: 8px; }
-#setupList::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+#setupsCard { flex: 1; min-height: 150px; }
+#setupsCard > .cb { gap: 8px; }
 .setup {
   position: relative; /* anchors the delete button, which must not take row width */
-  display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px;
-  border: 1px solid transparent; cursor: pointer; transition: background 0.12s, border-color 0.12s;
-  margin-bottom: 2px; outline: none;
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 6px; border-left: 4px solid transparent;
+  border-bottom: 1px solid var(--line); cursor: pointer; outline: none;
 }
-.setup:hover { background: var(--card-2); }
-.setup:focus-visible { border-color: var(--accent); }
-.setup.on { background: var(--card-2); border-color: var(--border); box-shadow: inset 3px 0 0 var(--accent); }
+.setup:hover { background: var(--accent-2); color: var(--hover-fg); }
+.setup:focus-visible { outline: 2px solid var(--warn); outline-offset: -2px; }
+/* Playing = black row, red bar and red text; selected (loaded) = navy. */
+.setup.playing { border-left-color: #da0000; background: var(--ink); color: var(--red); }
+.setup.playing:hover { background: var(--accent-2); color: var(--hover-fg); }
+.setup.on, .setup.on:hover, .setup.playing.on { background: var(--sel-bg); color: var(--sel-fg); }
 .setup-play {
-  flex: none; border: 1px solid var(--border); border-radius: 50%; cursor: pointer; display: grid; place-items: center;
-  width: 36px; height: 36px; color: var(--text); background: transparent;
-  transition: color 0.12s, background 0.12s, border-color 0.12s;
+  flex: none; width: 26px; height: 24px; cursor: pointer; display: grid; place-items: center; color: var(--text);
+  background: var(--btn); border: 1px solid #000; border-radius: 3px; box-shadow: var(--bevel);
 }
-.setup-play:hover { background: var(--hover); border-color: var(--accent); }
-.setup-play.playing { color: #fff; background: var(--accent); border-color: var(--accent); }
+.setup-play:hover { background: #3b3b3b; }
+.setup-play.playing { background: #2a2a2a; box-shadow: var(--bevel-down); color: var(--red); }
 .setup-ico {
-  width: 26px; height: 26px; border-radius: 8px; flex: none; display: grid; place-items: center;
-  background: var(--card-2); border: 1px solid var(--border-soft); color: var(--muted);
-  font-size: 12px; transition: all 0.15s;
+  flex: none; min-width: 26px; color: var(--faint); font: 600 11px "Overpass Mono", Consolas, monospace; font-stretch: 100%;
 }
-.setup.on .setup-ico { background: var(--card); color: var(--text); border-color: var(--border); }
+.setup.on .setup-ico, .setup.playing .setup-ico { color: inherit; }
 .setup-main { flex: 1; min-width: 0; }
-.setup-name { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.setup-name { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Count + badges: wrap as whole items onto a second line when the row is
    narrow, never break "1 enceinte" or a badge in two, never overlap. */
-.setup-sub { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-top: 3px; font-size: 11px; color: var(--faint); }
+.setup-sub { display: flex; flex-wrap: wrap; gap: 3px 5px; align-items: center; margin-top: 3px; font-size: 10.5px; font-weight: 600; color: var(--faint); }
 .setup-sub > * { white-space: nowrap; }
-.badge.playing { color: var(--green); border-color: rgba(61, 220, 132, 0.4); }
-.badge.modified { color: var(--warn); border-color: rgba(232, 163, 61, 0.4); }
-.badge.selected { color: var(--accent-2); border-color: rgba(var(--accent-rgb), 0.4); }
+.setup.on .setup-sub, .setup.playing .setup-sub { color: inherit; }
+.badge.playing { color: var(--green); }
+.badge.modified { color: var(--warn); }
+.badge.selected { color: var(--accent-2); }
 /* "Save changes": icon only (tooltip says where it saves), so the row keeps
    its room for the name. */
-.setup-save {
-  flex: none; width: 30px; height: 30px; padding: 0; display: grid; place-items: center;
-  color: var(--warn); border-color: rgba(232, 163, 61, 0.55); border-radius: 50%;
-}
+.setup-save { flex: none; width: 26px; height: 24px; min-height: 0; padding: 0; display: grid; place-items: center; }
 .setup-del {
-  position: absolute; top: 2px; right: 2px; z-index: 1;
-  border: 0; background: transparent; color: var(--faint); border-radius: 5px;
-  width: 18px; height: 18px; cursor: pointer; font-size: 11px; line-height: 1;
-  opacity: 0; transition: opacity 0.12s, color 0.12s, background 0.12s;
+  position: absolute; top: 1px; right: 1px; z-index: 1; border: 0; background: transparent; color: var(--faint);
+  width: 16px; height: 16px; cursor: pointer; font-size: 10px; line-height: 1; opacity: 0; transition: opacity 0.12s;
 }
 .setup:hover .setup-del, .setup:focus-within .setup-del { opacity: 1; }
-.setup-del:hover { color: var(--red); background: rgba(239, 111, 111, 0.12); }
-.setup-form { display: flex; gap: 10px; margin-top: 10px; flex: none; }
+.setup-del:hover { color: var(--red); }
+.setup-form { display: flex; gap: 8px; flex: none; }
 
-/* ---------- Text inputs ---------- */
+/* ---------- Text inputs: black field, red frame, green text ---------- */
 .text-input {
-  flex: 1; min-width: 0; background: var(--card-2); border: 1px solid var(--border-soft); border-radius: 9px;
-  color: var(--text); padding: 8px 12px; font: 13.5px "Segoe UI Variable Text", "Segoe UI", sans-serif;
-  outline: none; transition: border-color 0.15s;
+  flex: 1; min-width: 0; background: var(--ink); border: 2px solid #111;
+  color: var(--green); padding: 4px 7px; font: 600 12px "Overpass Mono", Consolas, monospace; font-stretch: 100%;
+  outline: none; caret-color: #e83c3c;
 }
-.text-input:focus { border-color: var(--accent); }
+.text-input:focus { border-color: var(--red-frame); }
 .text-input:disabled { opacity: 0.45; }
 .text-input::placeholder { color: var(--faint); }
+select.text-input {
+  background: var(--btn); border: 1px solid #000; box-shadow: var(--bevel);
+  color: var(--text); font: inherit; font-weight: 700; border-radius: 3px;
+}
 /* ---------- Mic calibration modal ---------- */
-.cal-row { display: flex; align-items: center; gap: 10px; padding: 6px 2px; font-size: 13px; }
+.cal-row { display: flex; align-items: center; gap: 10px; padding: 5px 2px; font-size: 12.5px; }
 .cal-row .cal-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cal-row .cal-status { flex: none; font-size: 12.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.cal-row .cal-status { flex: none; font: 600 12px "Overpass Mono", Consolas, monospace; font-stretch: 100%; color: var(--faint); font-variant-numeric: tabular-nums; }
 .cal-row.measuring .cal-status { color: var(--warn); }
 .cal-row.done .cal-status { color: var(--green); }
 .cal-row.failed .cal-status { color: var(--red); }
 #calResults { margin-bottom: 4px; }
 
 /* ---------- Footer ---------- */
-footer { flex: none; text-align: center; color: var(--faint); font-size: 11.5px; padding: 2px 0 4px; }
-footer kbd {
-  background: var(--card-2); border: 1px solid var(--border); border-radius: 4px;
-  padding: 1px 5px; font: 10.5px Consolas, monospace; color: var(--muted);
+footer {
+  flex: none; text-align: center; background: var(--ink); border: 2px solid var(--red-frame);
+  color: var(--green); padding: 4px 8px; font: 600 11px "Overpass Mono", Consolas, monospace; font-stretch: 100%;
 }
+footer:empty { display: none; }
+footer kbd { background: var(--btn); border: 1px solid var(--lo); border-top-color: var(--hi); padding: 0 5px; font-size: 10.5px; color: var(--text); }
 </style>
 </head>
 <body>
 <div id="app">
-  <header>
-    <div class="logo">
-      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round">
-        <path d="M3 12h2l2-6 3 12 3-16 3 14 2-8 2 4h1"/>
-      </svg>
+  <header class="win">
+    <div class="tb">AudioLinker</div>
+    <div class="cb head-row">
+      <span class="pix logo" data-ic="enceinte" data-size="32"></span>
+      <div class="brand">
+        <div class="status" id="statusPill"><span class="dot"></span><span id="statusText">Groupe arrêté</span></div>
+      </div>
+      <button class="icon-btn" id="muteBtn" title="Couper le son de tout le groupe (sans toucher aux réglages)">
+        <span class="pix" id="muteIcon" data-ic="volume"></span>
+      </button>
+      <button class="icon-btn" id="optionsBtn" title="Options"><span class="pix" data-ic="options"></span></button>
+      <button id="toggleBtn"><span class="spin"></span><span id="toggleLabel">Démarrer le groupe</span></button>
     </div>
-    <div class="brand">
-      <h1>AudioLinker</h1>
-      <div class="status" id="statusPill"><span class="dot"></span><span id="statusText">Groupe arrêté</span></div>
-    </div>
-    <button class="icon-btn" id="muteBtn" title="Couper le son de tout le groupe (sans toucher aux réglages)">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-        <path id="muteWaves" d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9.5 9.5 0 0 1 0 14"/>
-        <path id="muteCross" d="M22 9l-6 6M16 9l6 6" style="display:none"/>
-      </svg>
-    </button>
-    <button class="icon-btn" id="optionsBtn" title="Options">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="3.2"/>
-        <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34 1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87 1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/>
-      </svg>
-    </button>
-    <button id="toggleBtn"><span class="spin"></span><span id="toggleLabel">Démarrer le groupe</span></button>
   </header>
 
   <div id="banner" hidden><span class="banner-text" id="bannerText"></span><button class="ghost-btn" id="bannerBtn" hidden></button></div>
 
   <main>
     <div id="colLeft">
-    <section class="card" id="setupsCard">
-      <h2>Setups</h2>
-      <div id="setupList"></div>
-      <div class="setup-form">
-        <input type="text" class="text-input" id="setupName" maxlength="60" spellcheck="false"
-               placeholder="Nom du setup (ex. Soirée, Bureau, Cinéma)…">
-        <button class="ghost-btn" id="saveSetupBtn">Enregistrer l'actuel</button>
+    <section class="win" id="setupsCard">
+      <div class="tb">Setups</div>
+      <div class="cb">
+        <div class="list" id="setupList"></div>
+        <div class="setup-form">
+          <input type="text" class="text-input" id="setupName" maxlength="60" spellcheck="false"
+                 placeholder="Nom du setup…">
+          <button class="ghost-btn" id="saveSetupBtn">Enregistrer l'actuel</button>
+        </div>
       </div>
     </section>
     </div>
 
-    <section class="card" id="devicesCard">
+    <section class="win" id="devicesCard">
+      <div class="tb">Enceintes</div>
+      <div class="cb">
       <div class="card-head">
-        <h2>Enceintes</h2>
         <div class="seg-tabs" id="devTabs">
           <button class="seg-tab active" data-tab="outputs">Sorties</button>
           <button class="seg-tab" data-tab="inputs">Entrées</button>
         </div>
       </div>
-      <div id="deviceList"></div>
-      <div id="inputList" style="display:none"></div>
+      <div class="list" id="deviceList"></div>
+      <div class="list" id="inputList" style="display:none"></div>
       <div class="row" id="devicesToolbar">
         <button class="ghost-btn" id="calBtn"
                 title="Joue un tick régulier à travers le groupe : ajustez la latence de chaque enceinte jusqu'à ce que les ticks fusionnent">
@@ -449,13 +447,7 @@ footer kbd {
         <button class="ghost-btn" id="micCalBtn"
                 title="Mesure la latence réelle de chaque enceinte avec un micro (balayage sonore) puis les aligne automatiquement">
           Calage micro</button>
-        <button class="ghost-btn" id="refreshBtn" style="padding:5px 9px" title="Actualiser">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M23 4v6h-6"/>
-            <path d="M1 20v-6h6"/>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-          </svg>
-        </button>
+        <button class="ghost-btn" id="refreshBtn" title="Actualiser la liste des périphériques">Actualiser</button>
         <label>Volume</label>
         <input type="range" id="sMasterVol" min="0" max="100" step="1"
                title="Atténue toutes les enceintes proportionnellement, sans changer leur équilibre respectif">
@@ -464,6 +456,7 @@ footer kbd {
       <div id="inputsHint" style="display:none">Le micro coché devient le micro par défaut de Windows,
         immédiatement et à chaque application de ce setup. Aucun micro coché&nbsp;: le setup ne touche
         pas au micro.</div>
+      </div>
     </section>
   </main>
 
@@ -499,12 +492,14 @@ footer kbd {
   <div class="modal-panel" style="width:380px">
     <div class="modal-head">
       <h2>Supprimer le setup</h2>
-      <button class="modal-close" data-close="#confirmModal" title="Fermer">✕</button>
+      <button class="modal-close" data-close="#confirmModal" title="Fermer">×</button>
     </div>
+    <div class="modal-body">
     <p id="confirmText" class="confirm-text"></p>
     <div class="confirm-actions">
       <button class="ghost-btn" id="confirmNo">Annuler</button>
       <button class="danger-btn" id="confirmYes">Supprimer</button>
+    </div>
     </div>
   </div>
 </div>
@@ -513,8 +508,9 @@ footer kbd {
   <div class="modal-panel" style="width:440px">
     <div class="modal-head">
       <h2>Calage automatique au micro</h2>
-      <button class="modal-close" data-close="#calModal" title="Fermer">✕</button>
+      <button class="modal-close" data-close="#calModal" title="Fermer">×</button>
     </div>
+    <div class="modal-body">
     <p class="confirm-text" style="margin-bottom:14px">
       Placez le micro à votre position d'écoute. Un court balayage sonore sera joué
       sur chaque enceinte cochée, puis leurs latences seront alignées automatiquement
@@ -528,6 +524,7 @@ footer kbd {
     <div class="confirm-actions">
       <button class="ghost-btn" id="calCancelBtn" style="display:none">Annuler la mesure</button>
       <button class="ghost-btn" id="calStartBtn">Démarrer la mesure</button>
+    </div>
     </div>
   </div>
 </div>
@@ -558,27 +555,16 @@ const hexToRgbTriplet = hex =>
   [hex.slice(0, 2), hex.slice(2, 4), hex.slice(4, 6)].map(h => parseInt(h, 16)).join(", ");
 const plural = (n, word) => `${n} ${word}${n > 1 ? "s" : ""}`;
 
-const SVG_PLAY = '<svg width="16" height="16" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>';
-const SVG_STOP = '<svg width="16" height="16" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>';
-const SVG_SAVE = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-  '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>';
-const SVG_BELL = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-  '<path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>';
+const SVG_PLAY = '<svg width="14" height="14" viewBox="0 0 14 14" shape-rendering="crispEdges"><path d="M3 1h2v12H3zM5 2h2v10H5zM7 3h2v8H7zM9 4h2v6H9zM11 5h1v4h-1z" fill="currentColor"/></svg>';
+const SVG_STOP = '<svg width="14" height="14" viewBox="0 0 14 14" shape-rendering="crispEdges"><rect x="3" y="3" width="8" height="8" fill="currentColor"/></svg>';
+const SVG_SAVE = pix("disquette", 16);
+const SVG_BELL = pix("volume", 16);
 
-// Physical device type badge (see AudioDeviceKind in DeviceManager.h) --
-// same stroke style across the set so an unrecognized/new kind falling back
-// to "speaker" doesn't look out of place.
-const KIND_ICON_ATTRS = 'width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
-  'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+// Physical device type -> pixel icon (see AudioDeviceKind in DeviceManager.h
+// and assets/icons.js). An unrecognized/new kind falls back to the speaker.
 const KIND_ICONS = {
-  speaker: `<svg ${KIND_ICON_ATTRS}><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/>` +
-           '<circle cx="12" cy="14" r="4"/><line x1="12" y1="6" x2="12.01" y2="6"/></svg>',
-  headphones: `<svg ${KIND_ICON_ATTRS}><path d="M3 18v-6a9 9 0 0 1 18 0v6"/>` +
-              '<path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>',
-  hdmi: `<svg ${KIND_ICON_ATTRS}><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>` +
-        '<line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
-  digital: `<svg ${KIND_ICON_ATTRS}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`,
-  bluetooth: `<svg ${KIND_ICON_ATTRS}><polyline points="6.5 6.5 17.5 17.5 12 23 12 1 17.5 6.5 6.5 17.5"/></svg>`,
+  speaker: pix("enceinte"), headphones: pix("casque"), hdmi: pix("ecran"),
+  digital: pix("cable"), bluetooth: pix("bluetooth"),
 };
 const KIND_LABELS = {
   speaker: "Haut-parleurs", headphones: "Casque", hdmi: "HDMI / écran",
@@ -661,8 +647,7 @@ function renderHeader() {
   const mute = $("#muteBtn");
   mute.classList.toggle("on", !!state.groupMuted);
   mute.title = state.groupMuted ? "Rétablir le son du groupe" : "Couper le son de tout le groupe (sans toucher aux réglages)";
-  $("#muteWaves").style.display = state.groupMuted ? "none" : "";
-  $("#muteCross").style.display = state.groupMuted ? "" : "none";
+  $("#muteIcon").innerHTML = pix(state.groupMuted ? "muet" : "volume");
   // Group stopped: the default device is restored, ticks would blast the
   // normal output instead of the group.
   if (!state.running && typeof calTimer !== "undefined" && calTimer) setCalibration(false);
@@ -739,7 +724,6 @@ function renderList() {
     kindIcon.className = "dev-kind";
     kindIcon.innerHTML = KIND_ICONS[d.kind] || KIND_ICONS.speaker;
     kindIcon.title = KIND_LABELS[d.kind] || "";
-    if (d.color) kindIcon.style.color = "#" + d.color;
     const name = document.createElement("div");
     name.className = "dev-name";
     name.textContent = displayName(d);
@@ -813,13 +797,8 @@ function renderDevTab() {
   $("#inputsHint").style.display = outputs ? "none" : "";
 }
 
-const MIC_ICON = `<svg ${KIND_ICON_ATTRS}><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>` +
-  '<path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>' +
-  '<line x1="8" y1="23" x2="16" y2="23"/></svg>';
-const MIC_OFF_ICON = `<svg ${KIND_ICON_ATTRS}><line x1="1" y1="1" x2="23" y2="23"/>` +
-  '<path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/>' +
-  '<path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/>' +
-  '<line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
+const MIC_ICON = pix("micro");
+const MIC_OFF_ICON = pix("muet");
 
 const inputRowRefs = new Map(); // captureId -> {row, fill}
 
@@ -1330,7 +1309,7 @@ function renderSetups() {
     const isModified = isEditing && !state.activeSetup;
     const isPlaying = s.name === state.playingSetup && state.running && !state.starting;
     const row = document.createElement("div");
-    row.className = "setup" + (isActive ? " on" : "");
+    row.className = "setup" + (isActive ? " on" : "") + (isPlaying ? " playing" : "");
     row.title = "Cliquer pour sélectionner et modifier ce setup (sans le jouer)"
               + (i < 9 ? ` · Ctrl+Maj+${i + 1} pour le jouer directement` : "");
 
@@ -1339,7 +1318,7 @@ function renderSetups() {
     // Always the number (doubles as the Ctrl+Maj+N hotkey reminder) --
     // .setup.on only recolors the background, selecting a setup shouldn't
     // replace its digit.
-    ico.textContent = i < 9 ? String(i + 1) : "•";
+    ico.textContent = i < 9 ? `[${i + 1}]` : "[ ]";
 
     const main = document.createElement("div");
     main.className = "setup-main";
@@ -1996,8 +1975,6 @@ if (bridge) {
     if (!m || !m.type) return;
     if (m.type === "state") {
       state = m;
-      applyAccent(m.accent);
-      applyTheme(m.theme);
       renderAll();
       if (!sourcesRequested) requestSources(); // once, so the ♪ badges have names
     } else if (m.type === "status") {
@@ -2022,6 +1999,18 @@ if (bridge) {
   });
   post("ready");
 }
+
+// The window holding the focus is the red one (KDX: only the active window
+// has the red frame and title bar). Clicking or tabbing into a window
+// makes it the active one.
+function setFocusWin(win) {
+  for (const w of document.querySelectorAll(".win")) w.classList.toggle("focus", w === win);
+}
+for (const w of document.querySelectorAll(".win")) {
+  w.addEventListener("mousedown", () => setFocusWin(w));
+  w.addEventListener("focusin", () => setFocusWin(w));
+}
+setFocusWin(document.getElementById("devicesCard"));
 </script>
 </body>
 </html>

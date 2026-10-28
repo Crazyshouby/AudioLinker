@@ -21,17 +21,13 @@ void CloseSwitcherHook() {
 
 namespace switcher {
 
-// Mirrors the web UI theme (ui.html :root variables).
+// Mirrors the web UI (common.css): --panel, --frame/--red-frame, --text,
+// --muted, --faint. Single dark theme.
 struct Palette { COLORREF bg, border, text, muted, faint; };
 
 Palette CurrentPalette() {
-    if (EffectiveLightTheme()) {
-        // ui.html light theme: --card, --border, --text, --muted, --faint.
-        return { RGB(0xF6, 0xF6, 0xF6), RGB(0xCF, 0xCF, 0xCF), RGB(0x1C, 0x1C, 0x1C),
-                 RGB(0x5E, 0x5E, 0x5E), RGB(0x8C, 0x8C, 0x8C) };
-    }
-    return { RGB(0x1C, 0x1C, 0x1C), RGB(0x34, 0x34, 0x34), RGB(0xEC, 0xEC, 0xEC),
-             RGB(0xA0, 0xA0, 0xA0), RGB(0x6B, 0x6B, 0x6B) };
+    return { RGB(0x33, 0x33, 0x33), RGB(0x88, 0x00, 0x00), RGB(0xFF, 0xFF, 0xFF),
+             RGB(0xDD, 0xDD, 0xDD), RGB(0xA7, 0xAF, 0xB2) };
 }
 
 int g_index = -1;  // selected row
@@ -116,9 +112,9 @@ void Paint(HWND wnd, HDC target) {
     FrameRect(hdc, &rc, frame);
     DeleteObject(frame);
 
-    HFONT fontTitle = CreateFontW(-s(11), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET,
+    HFONT fontTitle = CreateFontW(-s(11), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-    HFONT fontRow = CreateFontW(-s(15), 0, 0, 0, FW_MEDIUM, 0, 0, 0, DEFAULT_CHARSET,
+    HFONT fontRow = CreateFontW(-s(15), 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     HFONT fontSmall = CreateFontW(-s(11), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
@@ -145,12 +141,9 @@ void Paint(HWND wnd, HDC target) {
         RECT row = { m.padX, top, w - m.padX, top + m.rowH };
         bool cur = (i == g_index);
         if (cur) {
-            HBRUSH b = CreateSolidBrush(GetWindowsAccentColor());
-            HBRUSH oldB = static_cast<HBRUSH>(SelectObject(hdc, b));
-            HPEN oldP = static_cast<HPEN>(SelectObject(hdc, GetStockObject(NULL_PEN)));
-            RoundRect(hdc, row.left, row.top, row.right, row.bottom, s(10), s(10));
-            SelectObject(hdc, oldP);
-            SelectObject(hdc, oldB);
+            // KDX selected row: navy, square corners.
+            HBRUSH b = CreateSolidBrush(RGB(0x00, 0x11, 0x77));
+            FillRect(hdc, &row, b);
             DeleteObject(b);
         }
         size_t checkedCount = 0;
@@ -161,9 +154,9 @@ void Paint(HWND wnd, HDC target) {
                            (checkedCount > 1 ? L" enceintes" : L" enceinte");
         RECT nameRc = { row.left + s(14), row.top, row.right - s(110), row.bottom };
         RECT cntRc = { row.right - s(106), row.top, row.right - s(14), row.bottom };
-        drawText(g_setups[i].name, nameRc, cur ? RGB(255, 255, 255) : pal.text, fontRow,
+        drawText(g_setups[i].name, nameRc, cur ? RGB(0xFF, 0x00, 0xFF) : pal.text, fontRow,
                  DT_LEFT | DT_VCENTER | DT_END_ELLIPSIS);
-        drawText(cnt, cntRc, cur ? RGB(230, 228, 255) : pal.faint, fontSmall, DT_RIGHT | DT_VCENTER);
+        drawText(cnt, cntRc, cur ? RGB(0xFF, 0x00, 0xFF) : pal.faint, fontSmall, DT_RIGHT | DT_VCENTER);
     }
 
     RECT hintRc = { m.padX, h - m.hintH - m.padBottom, w - m.padX, h - m.padBottom };

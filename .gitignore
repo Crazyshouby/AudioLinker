@@ -19,3 +19,6 @@ third_party/webview2/build/native/*
 third_party/webview2/build/native/x64/*
 !third_party/webview2/build/native/x64/WebView2LoaderStatic.lib
 build-*/
+
+# Python bytecode (tools/)
+__pycache__/
