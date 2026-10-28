@@ -5,14 +5,12 @@
 <title>Options — AudioLinker</title>
 <style>
 /*@common.css@*/
-body { background: var(--frame); }
-/* The page is one KDX panel inside the native window's frame; each section
-   heading is a small title bar. */
+/* The page is one KDX window (frame and title bar from common.css); each
+   section heading is a small title bar of its own. */
 #app {
-  display: grid; gap: 10px; height: calc(100% - 6px); margin: 3px; padding: 12px 14px 14px;
-  align-content: start; overflow-y: auto; background: var(--panel);
-  border: 1px solid #000; box-shadow: 0 1px 0 #555;
+  display: grid; gap: 10px; padding: 12px 14px 14px; align-content: start; overflow-y: auto; flex: 1;
 }
+.grip-rz { display: block; }
 #app::-webkit-scrollbar { width: 10px; }
 #app::-webkit-scrollbar-track { background: #333; box-shadow: inset 1px 0 0 #000; }
 #app::-webkit-scrollbar-thumb { background: var(--btn); border: 1px solid #000; border-radius: 2px; box-shadow: var(--bevel); }
@@ -28,7 +26,13 @@ h3.sec:first-child { margin-top: 0; }
 </style>
 </head>
 <body>
-<div id="app">
+<div class="win" id="optWin">
+<div class="tb">
+  <button class="tb-btn tb-l" data-act="close" data-glyph="x" title="Fermer" aria-label="Fermer"></button>
+  <span class="tb-title">Options</span>
+  <button class="tb-btn tb-r" data-act="shade" data-glyph="minus" title="Enrouler" aria-label="Enrouler"></button>
+</div>
+<div id="app" class="cb">
   <h3 class="sec">Démarrage</h3>
   <div class="row">
     <label class="switch"><input type="checkbox" id="launchWin"><span class="track"></span></label>
@@ -105,6 +109,8 @@ h3.sec:first-child { margin-top: 0; }
     <button class="ghost-btn" id="openLogBtn" style="font-size:11.5px;padding:4px 10px">
       Ouvrir le journal de diagnostic</button>
   </div>
+</div>
+<div class="grip-rz"></div>
 </div>
 <div id="toasts"></div>
 
@@ -244,6 +250,7 @@ if (bridge) {
   bridge.addEventListener("message", ev => {
     const m = ev.data;
     if (!m || !m.type) return;
+    if (chromeMessage(m)) return;
     if (m.type === "state") {
       state = m;
       renderAll();

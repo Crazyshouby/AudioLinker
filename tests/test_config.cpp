@@ -55,6 +55,8 @@ TEST(json_roundtrip_preserves_everything) {
     c.editingSetup = L"Soirée";
     c.routedApps = { L"Spotify.exe" };
     c.window = { 10, 20, 900, 700 };
+    c.panels["outputs"] = { 260, 40, 620, 520, true, false };
+    c.panels["journal"] = { 5, 6, 300, 200, false, true };
     c.automation.push_back({ kDevA, L"Soirée", L"stop" });
 
     std::string text = SerializeConfig(c);
@@ -92,6 +94,11 @@ TEST(json_roundtrip_preserves_everything) {
     CHECK(back.activeSetup == L"Soirée");
     CHECK_EQ(back.routedApps.size(), size_t(1));
     CHECK_EQ(back.window.w, 900);
+    CHECK_EQ(back.panels.size(), size_t(2));
+    CHECK_EQ(back.panels["outputs"].x, 260);
+    CHECK_EQ(back.panels["outputs"].h, 520);
+    CHECK(back.panels["outputs"].open && !back.panels["outputs"].shaded);
+    CHECK(!back.panels["journal"].open && back.panels["journal"].shaded);
     CHECK_EQ(back.automation.size(), size_t(1));
     CHECK(back.automation[0].onDisconnect == L"stop");
 }

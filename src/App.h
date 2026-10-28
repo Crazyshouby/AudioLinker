@@ -100,6 +100,9 @@ constexpr UINT WM_TRAYICON = WM_APP + 1;
 constexpr UINT WM_DEVICES_CHANGED = WM_APP + 2;
 // Windows' default render endpoint changed (see DeviceNotificationClient).
 constexpr UINT WM_DEFAULT_CHANGED = WM_APP + 3;
+// A line of the diagnostic log reached the Journal (see Journal.cpp); the
+// LPARAM owns a heap-allocated JournalLine.
+constexpr UINT WM_JOURNAL = WM_APP + 4;
 constexpr int HOTKEY_TOGGLE_GROUP = 1;   // Ctrl+Alt+G
 constexpr int HOTKEY_SETUP_SWITCHER = 2; // Ctrl+Alt+S
 // Ctrl+Shift+1..9 applies setup #1..9 directly. Ctrl+Alt+digit is off-limits:
@@ -107,10 +110,12 @@ constexpr int HOTKEY_SETUP_SWITCHER = 2; // Ctrl+Alt+S
 constexpr int HOTKEY_SETUP_FIRST = 10;
 constexpr int kSetupHotkeyCount = 9;
 
-constexpr int kMinClientW = 880;
-constexpr int kMinClientH = 540;
-constexpr int kDefaultClientW = 1100;
-constexpr int kDefaultClientH = 910;
+// The floating windows of the UI (Panels.cpp). The launcher is the app's main
+// window; the others are created when opened.
+enum class PanelId { Launcher, Outputs, Setups, Levels, Journal, Options };
+constexpr int kPanelCount = 6;
+constexpr int kLauncherW = 224; // logical px; the launcher has a fixed size
+constexpr int kLauncherH = 520;
 
 // Latency optimizer (see Optimizer.cpp).
 constexpr int kOptStepMs = 20;
@@ -156,7 +161,7 @@ extern int& g_baseCushionMs;
 extern int& g_deviceFillMs;
 extern bool& g_lowLatency;
 extern bool& g_setupDigitHotkeys;
-extern std::vector<std::wstring> g_pendingJson;
+extern std::vector<std::wstring> g_pendingJson; // toasts posted while no window was visible
 extern ULONGLONG g_lastDefaultChangeTick;
 extern UINT& g_toggleHotkeyMods;
 extern UINT& g_toggleHotkeyVk;
@@ -170,17 +175,9 @@ extern bool g_skipSaveOnExit;
 extern std::wstring g_startupWarning;
 extern UINT g_showAppMessage;
 extern HBRUSH g_hBrushWindowBg;
-extern HBRUSH g_optionsHBrushWindowBg;
 extern HICON g_hAppIcon;
 extern NOTIFYICONDATAW g_trayIcon;
-extern ComPtr<ICoreWebView2Controller> g_webviewController;
-extern ComPtr<ICoreWebView2> g_webview;
-extern EventRegistrationToken g_webMessageToken;
-extern ComPtr<ICoreWebView2Environment> g_webviewEnvironment;
-extern HWND g_optionsWnd;
-extern ComPtr<ICoreWebView2Controller> g_optionsController;
-extern ComPtr<ICoreWebView2> g_optionsWebview;
-extern EventRegistrationToken g_optionsMessageToken;
+extern ComPtr<ICoreWebView2Environment> g_webviewEnvironment; // shared by every window
 extern HHOOK g_switcherWheelHook;
 extern HWND g_switcherWnd;
 extern HWND g_mainWnd;
@@ -192,16 +189,64 @@ bool IsWindowsLightThemeEnabled();
 bool EffectiveLightTheme();
 COLORREF WindowBgForTheme(bool light);
 
-// --- Gui.cpp: main window ---
-void ApplyWindowTheme(HWND hwnd);
+// --- Gui.cpp: launcher window procedure, RunApplication ---
 std::wstring LoadHtmlResource(int resId);
-// Common settings of both WebView2 pages: no context menu / devtools /
+// Common settings of the WebView2 pages: no context menu / devtools /
 // accelerator keys, and no navigation away from the embedded page.
 void HardenWebView(ICoreWebView2* webview);
-void SuspendMainWebView();
-void ResumeMainWebView();
 void SaveWindowPlacement(HWND hwnd);
 bool LoadWindowPlacement(RECT& out);
+
+// --- Panels.cpp: the floating windows ---
+// Square corners, no DWM outline: the page draws the whole frame.
+void ApplyFlatFrame(HWND hwnd);
+const char* PanelKey(PanelId id);
+bool PanelFromKey(const std::wstring& key, PanelId& out);
+bool IsPanelOpen(PanelId id);
+bool IsLauncherHidden();
+bool AnyPanelVisible();
+// Called once the launcher's HWND exists: which windows were open last time.
+void AttachLauncherWindow(HWND hwnd, bool startHidden);
+// Creates the shared WebView2 environment, then the launcher page and the
+// windows that were open.
+void InitPanelWebViewEnvironment(HWND launcher);
+void OpenPanel(PanelId id);
+void ClosePanel(PanelId id); // the launcher: hides everything to the tray
+void TogglePanel(PanelId id);
+void ShadePanel(PanelId id, int mode); // mode: -1 toggle, 0 unroll, 1 roll up
+// JSON to one window / every open window / the one window a toast belongs in
+// (false = no window is showing).
+void PostToPanel(PanelId id, const std::wstring& jsonText);
+void PostToPanels(const std::wstring& jsonText);
+bool PostToastTarget(const std::wstring& jsonText);
+void SavePanelPlacements();
+void PanelsHideToTray();
+void PanelsRestoreFromTray();
+void DestroyAllPanels();
+void SuspendLauncherPage();
+void ResumeLauncherPage();
+void HideLauncherToTray();
+void ShowLauncherFromTray();
+// Chrome and window commands posted by a page; false = not one of them.
+bool HandlePanelMessage(PanelId from, const std::wstring& cmd, const std::wstring& rest);
+// WM_* shared by the launcher and the other windows; handled=false when the
+// message is not one of theirs.
+LRESULT PanelCommonProc(PanelId id, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, bool& handled);
+
+// --- Journal.cpp: the Journal window's data ---
+struct JournalLine {
+    long long ts; // unix ms
+    int level;    // 0 info, 1 warning, 2 error
+    std::wstring text;
+};
+// Hooks the diagnostic log (Log.h) so every line also reaches the Journal.
+void JournalInstall();
+// UI thread only. Adds a line and pushes it to the Journal window if open.
+void JournalAdd(int level, const std::wstring& text);
+// Takes ownership of a JournalLine posted with WM_JOURNAL.
+void JournalFromMessage(LPARAM lParam);
+void SendJournal(PanelId to);
+void JournalClear(); // empties the ring and every open Journal window
 
 // --- Devices.cpp ---
 bool IsVirtualDevice(const std::wstring& name);
@@ -280,6 +325,7 @@ void RepairAfterCrash();
 // --- WebBridge.cpp ---
 void PostJson(const json& j);
 void SendState();
+void SendStateTo(PanelId to);
 void SendSources();
 void SendStatus();
 void SendPeaks();
@@ -303,10 +349,6 @@ void Open();
 void StartOptimizer(HWND hwnd);
 void StopOptimizer(HWND hwnd, const std::wstring& infoMsg);
 void OptimizerTick(HWND hwnd);
-
-// --- OptionsWindow.cpp ---
-void ApplyOptionsWindowTheme();
-void OpenOptionsWindow(HWND owner);
 
 // --- Tray.cpp ---
 void AddTrayIcon(HWND hwnd);

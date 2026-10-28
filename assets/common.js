@@ -9,6 +9,14 @@ const post = m => { if (bridge) bridge.postMessage(m); };
 
 // The look is fixed (see common.css): no theme override, no Windows accent.
 
+// Which window this page is (set by the native side before the page runs):
+// launcher, outputs, setups, levels, journal, options -- or "all" in a plain
+// browser (tests), where every window is shown.
+// The native side leaves the name in window.__panel (a script that runs
+// before the document exists); it is copied onto <html> for the CSS.
+const PANEL = window.__panel || document.documentElement.dataset.panel || "";
+if (PANEL) document.documentElement.dataset.panel = PANEL;
+
 /*@icons.js@*/
 fillPix();
 
@@ -56,4 +64,55 @@ function toast(msg, kind, action) {
   box.appendChild(t);
   requestAnimationFrame(() => t.classList.add("show"));
   timer = setTimeout(dismiss, action ? 15000 : 5000);
+}
+
+// ---------- Window chrome (title bar buttons, drag, resize grip) ----------
+// The native side owns the window: the page only asks. data-act="close"
+// closes this window (the launcher: hides everything to the tray),
+// data-act="shade" rolls it up to its title bar; data-glyph picks the icon.
+const TB_GLYPHS = {
+  x: '<svg viewBox="0 0 9 9"><path d="M1 1L8 8M8 1L1 8" stroke="#fff" stroke-width="2" fill="none"/></svg>',
+  minus: '<svg viewBox="0 0 9 9"><path d="M1 4.5H8" stroke="#fff" stroke-width="2" fill="none"/></svg>',
+};
+function initChrome() {
+  for (const tb of document.querySelectorAll(".tb")) {
+    // Moving: the page reports press / movement / release, the native side
+    // reads the cursor and moves the window (a system move loop would take
+    // the mouse over and the page would never see the second press of a
+    // double click). Two presses within 400 ms roll the window up or down.
+    let lastDown = 0, dragging = false, moveQueued = false;
+    tb.addEventListener("pointerdown", ev => {
+      if (ev.button !== 0 || ev.target.closest(".tb-btn")) return;
+      const now = performance.now();
+      if (now - lastDown < 400) { lastDown = 0; post("shade"); return; }
+      lastDown = now;
+      dragging = true;
+      tb.setPointerCapture(ev.pointerId);
+      post("dragstart");
+    });
+    tb.addEventListener("pointermove", () => {
+      if (!dragging || moveQueued) return;
+      moveQueued = true;
+      requestAnimationFrame(() => { moveQueued = false; if (dragging) post("dragmove"); });
+    });
+    const endDrag = () => { if (dragging) { dragging = false; post("dragend"); } };
+    tb.addEventListener("pointerup", endDrag);
+    tb.addEventListener("pointercancel", endDrag);
+    for (const b of tb.querySelectorAll(".tb-btn")) {
+      b.innerHTML = TB_GLYPHS[b.dataset.glyph] || TB_GLYPHS.minus;
+      b.addEventListener("click", () => post(b.dataset.act === "close" ? "closepanel" : "shade"));
+    }
+  }
+  for (const g of document.querySelectorAll(".grip-rz")) {
+    g.addEventListener("mousedown", ev => { if (ev.button === 0) post("resizewin"); });
+  }
+}
+initChrome();
+
+// Messages every window understands: whether Windows has activated it (the
+// red frame) and whether it is rolled up. True = handled.
+function chromeMessage(m) {
+  if (m.type === "active") { document.body.classList.toggle("active", !!m.value); return true; }
+  if (m.type === "shade") { document.body.classList.toggle("shaded", !!m.value); return true; }
+  return false;
 }

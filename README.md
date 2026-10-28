@@ -55,16 +55,17 @@ ctest --test-dir build
 - `src/WasapiStream.cpp` — ouverture d'un flux partagé, négociation de format, conversions, période basse latence ; partagé par le moteur et le calibrateur.
 - `src/Calibrator.cpp` — calage micro : balayage sinusoïdal horodaté (QPC), détection par corrélation croisée.
 - `src/Config.cpp` — configuration JSON, migration INI, purge des périphériques fantômes.
-- `src/App.h` + `Gui.cpp`, `Group.cpp`, `Devices.cpp`, `SystemAudio.cpp`, `WebBridge.cpp`, `Hotkeys.cpp`, `Switcher.cpp`, `Optimizer.cpp`, `OptionsWindow.cpp`, `Tray.cpp` — interface Win32 + WebView2 (`assets/ui.html`, `assets/options.html`, parties communes `assets/common.*` inlinées au build), setups, routage par application, tray, hotkeys.
+- `src/App.h` + `Gui.cpp`, `Group.cpp`, `Devices.cpp`, `SystemAudio.cpp`, `WebBridge.cpp`, `Hotkeys.cpp`, `Switcher.cpp`, `Optimizer.cpp`, `Tray.cpp` — interface Win32 + WebView2 (`assets/ui.html`, `assets/options.html`, parties communes `assets/common.*` inlinées au build), setups, routage par application, tray, hotkeys.
+- `src/Panels.cpp` — les fenêtres de l'interface : le menu principal (`Gui.cpp`) et une fenêtre sans bordure par fonction (sorties, setups, niveaux, journal, options), chacune avec son WebView2. La barre de titre est dessinée par la page ; le natif déplace, redimensionne, enroule et ferme à sa demande, et mémorise position, taille et ouverture de chaque fenêtre. `src/Journal.cpp` alimente la fenêtre Journal (le journal de diagnostic en direct).
 - `src/DeviceManager.cpp` — énumération MMDevice et notifications de branchement.
 - `tests/` — tests unitaires (ring buffer, resampler, biquad, config) lancés par `ctest` et par la CI.
 
 ## Style graphique
 
-L'interface reprend le thème de KDX (Haxial) : fenêtres à barre de titre sur fond rouge, panneaux gris anthracite, boutons biseautés, consoles noires à texte vert, fenêtre active cerclée de rouge, pictogrammes pixel-art. Il n'y a qu'un thème (sombre) : le réglage clair/sombre et la couleur d'accentuation Windows ont disparu.
+L'interface reprend le thème et l'organisation de KDX (Haxial) : un menu principal étroit (colonne de boutons) et une vraie fenêtre par fonction (Sorties avec la fiche enceinte, Setups, Niveaux, Journal, Options), déplaçables, redimensionnables et enroulables par la barre de titre. Panneaux gris anthracite, boutons biseautés, consoles noires à texte vert, fenêtre active cerclée de rouge, pictogrammes pixel-art. Réduire le menu principal (« − ») range tout dans la zone de notification ; « Quitter » arrête l'application. Il n'y a qu'un thème (sombre) : le réglage clair/sombre et la couleur d'accentuation Windows ont disparu.
 
 - `assets/common.css` : jetons de couleur et widgets partagés par les deux pages. Les valeurs viennent de l'apparence par défaut de KDX, relevées pixel par pixel sur les captures sans perte de sa documentation (fenêtre active rouge, barres de titre en dégradé, relief des boutons, rangées bleu marine et pêche). Aucun fichier de KDX n'est repris : tout est redessiné.
-- `assets/fonts.css`, `assets/icons.js`, `assets/lava.css` : ressources **générées** (polices Archivo et Overpass Mono en base64, pictogrammes, fond). Elles sont versionnées ; le build n'exécute pas Python. Pour les régénérer : `python tools/gen_assets.py` (`--lava` pour refaire le fond, avec Chrome et Pillow). Les pictogrammes sont dessinés dans `tools/pixel_icons.py`.
+- `assets/fonts.css`, `assets/icons.js` : ressources **générées** (polices Archivo et Overpass Mono en base64, pictogrammes). Elles sont versionnées ; le build n'exécute pas Python. Pour les régénérer : `python tools/gen_assets.py`. Les pictogrammes sont dessinés dans `tools/pixel_icons.py`.
 
 ## Licence
 

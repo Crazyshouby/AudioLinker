@@ -72,6 +72,17 @@ struct WindowPlacement {
     bool valid() const { return w >= 200 && h >= 150; }
 };
 
+// One floating window of the KDX-style UI (see Panels.cpp): where it sits,
+// whether it was open when the app last ran, whether it was rolled up to its
+// title bar. Keyed by the panel's name ("outputs", "setups", ...); the
+// launcher (main window) keeps using AppConfig::window.
+struct PanelPlacement {
+    int x = 0, y = 0, w = 0, h = 0; // the window's normal rect, screen px
+    bool open = false;
+    bool shaded = false;
+    bool valid() const { return w >= 120 && h >= 60; }
+};
+
 struct AppConfig {
     bool autostart = false; // recreate the group when the app opens
     int masterVolume = 100;
@@ -106,6 +117,7 @@ struct AppConfig {
     std::vector<std::wstring> routedApps;
 
     WindowPlacement window;
+    std::map<std::string, PanelPlacement> panels;
     std::vector<AutomationRule> automation;
 };
 

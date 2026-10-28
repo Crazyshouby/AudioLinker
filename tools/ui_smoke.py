@@ -13,6 +13,8 @@ html = io.open(src, encoding="utf-8").read()
 
 STUB = r"""<script>
 window.__errors = []; window.__posted = [];
+// A plain browser has no native host: show every window side by side.
+document.documentElement.dataset.panel = "all";
 window.addEventListener("error", e => window.__errors.push("error: " + e.message));
 window.addEventListener("unhandledrejection", e => window.__errors.push("rejection: " + e.reason));
 window.chrome = { webview: {
