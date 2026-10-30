@@ -105,15 +105,18 @@
     menu(items, x, y, title = "") {
       document.querySelectorAll(".menu[data-kdx]").forEach(m => m.remove());
       const m = document.createElement("div"); m.className = "menu"; m.dataset.kdx = "1";
+      const icons = !!window.pix && items.some(it => it && it[2] && it[2].icon);   // l'espace d'icône n'existe que si un élément en a une
+      const keys = items.some(it => it && it[2] && it[2].key);
       m.innerHTML = (title ? `<div class="menu-title">${esc(title)}</div>` : "") + items.map((it, i) => !it ? '<div class="menu-sep"></div>' :
-        `<div class="menu-item ${it[2] && it[2].disabled ? "off" : ""}" data-i="${i}">${it[2] && it[2].icon && window.pix ? `<span class="pix">${window.pix(it[2].icon, 16)}</span>` : '<span style="width:16px"></span>'}<span>${esc(it[0])}</span><span style="margin-left:auto;padding-left:28px;color:var(--faint)">${esc((it[2] && it[2].key) || "")}</span></div>`).join("");
-      m.style.left = Math.max(0, Math.min(x, innerWidth - 260)) + "px"; m.style.top = Math.max(0, Math.min(y, innerHeight - 40 * items.length)) + "px";
-      const close = () => { m.remove(); document.removeEventListener("mousedown", away, true); document.removeEventListener("keydown", esc2, true); };
+        `<div class="menu-item ${it[2] && it[2].disabled ? "off" : ""}" data-i="${i}">${icons ? (it[2] && it[2].icon ? `<span class="pix">${window.pix(it[2].icon, 16)}</span>` : '<span style="width:16px"></span>') : ""}<span>${esc(it[0])}</span>${keys ? `<span style="margin-left:auto;padding-left:28px;color:var(--faint)">${esc((it[2] && it[2].key) || "")}</span>` : ""}</div>`).join("");
+      m.style.visibility = "hidden"; document.body.appendChild(m);
+      const r = m.getBoundingClientRect();   // placement d'après la taille réelle : le menu reste dans la fenêtre
+      m.style.left = Math.max(2, Math.min(x, innerWidth - r.width - 2)) + "px"; m.style.top = Math.max(2, Math.min(y, innerHeight - r.height - 2)) + "px"; m.style.visibility = "";
+      const close = () => { m.remove(); document.removeEventListener("mousedown", away, true); document.removeEventListener("keydown", esc2, true); window.removeEventListener("blur", close); };
       const away = e => { if (!m.contains(e.target)) close(); };
       const esc2 = e => { if (e.key === "Escape") close(); };
       m.addEventListener("click", e => { const el = e.target.closest("[data-i]"); if (!el) return; const it = items[+el.dataset.i]; if (it[2] && it[2].disabled) return; close(); it[1](); });
-      document.body.appendChild(m);
-      document.addEventListener("mousedown", away, true); document.addEventListener("keydown", esc2, true);
+      document.addEventListener("mousedown", away, true); document.addEventListener("keydown", esc2, true); window.addEventListener("blur", close);
       return close;
     },
   };
