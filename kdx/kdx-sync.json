@@ -3,7 +3,7 @@
   "files": {
     "kdx/kdx-ui.css": {
       "from": "kdx-ui.css",
-      "sha256": "834d7f0ccc8dd23569465aa8c10a554d24cd1aaf065f96d59b15ea4e54ea1272"
+      "sha256": "b6a2e7502197a6f5bcb620da26551da7c07492485cf251655ec8b09070a9adcd"
     },
     "kdx/themes.css": {
       "from": "themes.css",
@@ -31,7 +31,7 @@
     },
     "kdx/kdx-frame.js": {
       "from": "kdx-frame.js",
-      "sha256": "83c1da1c2356fc04c042e8142df811e53f8bc2db3655372c09a329e6f0194b20"
+      "sha256": "500ede24a3a8c9c856ab7f06b53cffa04235d1de25c1560efa75c7c37f237e2c"
     },
     "kdx/kdx-frame.css": {
       "from": "kdx-frame.css",

@@ -101,23 +101,60 @@
       });
     },
 
-    // Menu contextuel. items : [libellé, action, { icon, key, disabled }] ou null (séparateur). Se ferme au clic ailleurs ou à Échap.
+    // Menu contextuel. items : [libellé, action, { icon, key, disabled, check, sub }] ou null (séparateur). Se ferme au clic ailleurs, à Échap ou à la perte du focus de la fenêtre.
+    //  - check : true/false affiche une case (cochée ou non) devant le libellé ; undefined : pas de case.
+    //  - sub : un sous-menu (liste d'éléments de la même forme, ou fonction qui la rend : elle est appelée à l'ouverture, pour une liste longue ou lente à construire). Il s'ouvre au survol (120 ms)
+    //    ou au clic, à droite de l'élément (à gauche s'il manque de la place), et l'`action` d'un tel élément est ignorée. Cliquer une action d'un sous-menu ferme tous les niveaux.
     menu(items, x, y, title = "") {
       document.querySelectorAll(".menu[data-kdx]").forEach(m => m.remove());
-      const m = document.createElement("div"); m.className = "menu"; m.dataset.kdx = "1";
-      const icons = !!window.pix && items.some(it => it && it[2] && it[2].icon);   // l'espace d'icône n'existe que si un élément en a une
-      const keys = items.some(it => it && it[2] && it[2].key);
-      m.innerHTML = (title ? `<div class="menu-title">${esc(title)}</div>` : "") + items.map((it, i) => !it ? '<div class="menu-sep"></div>' :
-        `<div class="menu-item ${it[2] && it[2].disabled ? "off" : ""}" data-i="${i}">${icons ? (it[2] && it[2].icon ? `<span class="pix">${window.pix(it[2].icon, 16)}</span>` : '<span style="width:16px"></span>') : ""}<span>${esc(it[0])}</span>${keys ? `<span style="margin-left:auto;padding-left:28px;color:var(--faint)">${esc((it[2] && it[2].key) || "")}</span>` : ""}</div>`).join("");
-      m.style.visibility = "hidden"; document.body.appendChild(m);
-      const r = m.getBoundingClientRect();   // placement d'après la taille réelle : le menu reste dans la fenêtre
-      m.style.left = Math.max(2, Math.min(x, innerWidth - r.width - 2)) + "px"; m.style.top = Math.max(2, Math.min(y, innerHeight - r.height - 2)) + "px"; m.style.visibility = "";
-      const close = () => { m.remove(); document.removeEventListener("mousedown", away, true); document.removeEventListener("keydown", esc2, true); window.removeEventListener("blur", close); };
-      const away = e => { if (!m.contains(e.target)) close(); };
-      const esc2 = e => { if (e.key === "Escape") close(); };
-      m.addEventListener("click", e => { const el = e.target.closest("[data-i]"); if (!el) return; const it = items[+el.dataset.i]; if (it[2] && it[2].disabled) return; close(); it[1](); });
-      document.addEventListener("mousedown", away, true); document.addEventListener("keydown", esc2, true); window.addEventListener("blur", close);
-      return close;
+      const levels = [];   // les menus ouverts, du premier au dernier
+      const closeFrom = n => { while (levels.length > n) levels.pop().el.remove(); };
+      const closeAll = () => { closeFrom(0); document.removeEventListener("mousedown", away, true); document.removeEventListener("keydown", esc2, true); window.removeEventListener("blur", closeAll); };
+      const away = e => { if (!levels.some(l => l.el.contains(e.target))) closeAll(); };
+      const esc2 = e => { if (e.key === "Escape") closeAll(); };
+
+      // Construit un niveau ; `anchor` (rectangle de l'élément parent) place un sous-menu à côté de lui, sinon (x, y) est la position du pointeur.
+      function build(list, level, px, py, ttl, anchor) {
+        closeFrom(level);
+        const m = document.createElement("div"); m.className = "menu"; m.dataset.kdx = "1";
+        const icons = !!window.pix && list.some(it => it && it[2] && it[2].icon);   // l'espace d'icône n'existe que si un élément en a une
+        const keys = list.some(it => it && it[2] && it[2].key);
+        const checks = list.some(it => it && it[2] && it[2].check !== undefined);
+        m.innerHTML = (ttl ? `<div class="menu-title">${esc(ttl)}</div>` : "") + list.map((it, i) => {
+          if (!it) return '<div class="menu-sep"></div>';
+          const o = it[2] || {};
+          return `<div class="menu-item ${o.disabled ? "off" : ""}" data-i="${i}">${checks ? `<span class="chk${o.check ? " on" : ""}"></span>` : ""}${icons ? (o.icon ? `<span class="pix">${window.pix(o.icon, 16)}</span>` : '<span style="width:16px"></span>') : ""}<span>${esc(it[0])}</span>${keys ? `<span style="margin-left:auto;padding-left:28px;color:var(--faint)">${esc(o.key || "")}</span>` : ""}${o.sub ? '<span class="subarrow"></span>' : ""}</div>`;
+        }).join("");
+        m.style.visibility = "hidden"; document.body.appendChild(m);
+        const r = m.getBoundingClientRect();   // placement d'après la taille réelle : le menu reste dans la fenêtre
+        let left = px, top = py;
+        if (anchor) { left = anchor.right - 2; if (left + r.width > innerWidth - 2) left = anchor.left - r.width + 2; top = anchor.top - 6; }
+        m.style.left = Math.max(2, Math.min(left, innerWidth - r.width - 2)) + "px"; m.style.top = Math.max(2, Math.min(top, innerHeight - r.height - 2)) + "px"; m.style.visibility = "";
+        const lv = { el: m, list, timer: 0 }; levels.push(lv);
+        const openSub = el => {
+          const it = list[+el.dataset.i]; if (!it || !it[2] || !it[2].sub || (it[2] && it[2].disabled)) return;
+          let sub = it[2].sub; try { if (typeof sub === "function") sub = sub(); } catch { sub = []; }
+          if (!sub || !sub.length) return;
+          build(sub, level + 1, 0, 0, "", el.getBoundingClientRect());
+        };
+        m.addEventListener("mouseover", e => {
+          const el = e.target.closest("[data-i]"); if (!el || !m.contains(el)) return;
+          clearTimeout(lv.timer);
+          const it = list[+el.dataset.i];
+          if (it && it[2] && it[2].sub) { if (levels[level + 1] && levels[level + 1].from === el) return; lv.timer = setTimeout(() => { openSub(el); if (levels[level + 1]) levels[level + 1].from = el; }, 120); }
+          else lv.timer = setTimeout(() => closeFrom(level + 1), 120);   // un élément sans sous-menu : les sous-menus ouverts se referment
+        });
+        m.addEventListener("click", e => {
+          const el = e.target.closest("[data-i]"); if (!el) return; const it = list[+el.dataset.i]; if (!it || (it[2] && it[2].disabled)) return;
+          if (it[2] && it[2].sub) { clearTimeout(lv.timer); openSub(el); if (levels[level + 1]) levels[level + 1].from = el; return; }
+          closeAll(); if (typeof it[1] === "function") it[1]();
+        });
+        return m;
+      }
+
+      build(items, 0, x, y, title, null);
+      document.addEventListener("mousedown", away, true); document.addEventListener("keydown", esc2, true); window.addEventListener("blur", closeAll);
+      return closeAll;
     },
   };
   window.KdxFrame = KdxFrame;
