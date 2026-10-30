@@ -94,6 +94,9 @@ constexpr int kAutomationDelayMs = 1500;
 // Level meters (VU bars, spectrum): faster than the status timer so the
 // bars move instead of stepping, with a message that carries nothing else.
 constexpr UINT_PTR IDT_VU_TIMER = 10;
+// Polls the KDX suite settings (%APPDATA%\KDX\suite.json) for an accent change, see KdxLink.cpp.
+constexpr UINT_PTR IDT_SUITE = 11;
+constexpr int kSuiteIntervalMs = 250;
 constexpr int kVuIntervalMs = 100;
 constexpr int kStatusIntervalMs = 250;
 constexpr UINT WM_TRAYICON = WM_APP + 1;
@@ -103,6 +106,9 @@ constexpr UINT WM_DEFAULT_CHANGED = WM_APP + 3;
 // A line of the diagnostic log reached the Journal (see Journal.cpp); the
 // LPARAM owns a heap-allocated JournalLine.
 constexpr UINT WM_JOURNAL = WM_APP + 4;
+// The link with the other KDX applications (KdxLink.cpp): WPARAM 0 = a client connected, 1 = a command (LPARAM owns a
+// heap-allocated std::wstring), 2 = the client asks for the state.
+constexpr UINT WM_KDX_LINK = WM_APP + 5;
 constexpr int HOTKEY_TOGGLE_GROUP = 1;   // Ctrl+Alt+G
 constexpr int HOTKEY_SETUP_SWITCHER = 2; // Ctrl+Alt+S
 // Ctrl+Shift+1..9 applies setup #1..9 directly. Ctrl+Alt+digit is off-limits:
@@ -341,6 +347,18 @@ void SendInfo(const std::wstring& message);
 void SendErrorWithAction(const std::wstring& message, const std::wstring& command,
                          const std::wstring& label);
 void HandleWebMessage(HWND hwnd, const std::wstring& msg);
+json BuildState();
+
+// --- KdxLink.cpp ---
+void KdxLinkStart();
+void KdxLinkStop();
+void KdxLinkPublish(const json& state, bool force = false);
+void KdxLinkHandle(HWND hwnd, WPARAM what, LPARAM param);
+// A notification for the KDX shell's quick centre (no answer expected, sent from a worker thread, dropped if the shell is not running).
+void KdxNotifyShell(const char* level, const std::wstring& text);
+void KdxSuiteStart(HWND hwnd);
+void KdxSuiteTick();
+const std::string& KdxSuiteAccent();
 
 // --- Switcher.cpp ---
 void CloseSwitcherHook();

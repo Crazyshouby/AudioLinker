@@ -112,6 +112,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             g_mainWnd = hwnd;
             AttachLauncherWindow(hwnd, g_startHidden);
             JournalInstall(); // the diagnostic log also feeds the Journal window
+            KdxLinkStart();   // the pipe other KDX applications talk to
+            KdxSuiteStart(hwnd); // the accent of the KDX suite
             // g_cfg was loaded in RunApplication (before the window existed).
             g_autostartPending = g_autostart;
             g_engine.setBaseCushionMs(g_baseCushionMs);
@@ -147,6 +149,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
         case WM_JOURNAL:
             JournalFromMessage(lParam);
+            return 0;
+        case WM_KDX_LINK:
+            KdxLinkHandle(hwnd, wParam, lParam);
             return 0;
         case WM_TRAYICON: {
             if (LOWORD(lParam) == WM_LBUTTONUP) RestoreFromTray(hwnd);
@@ -216,6 +221,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
         }
         case WM_TIMER:
+            if (wParam == IDT_SUITE) { KdxSuiteTick(); return 0; }
             if (wParam == IDT_DEVICE_REFRESH) {
                 KillTimer(hwnd, IDT_DEVICE_REFRESH);
                 PopulateOutputList();
@@ -391,6 +397,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             // the relaunched instance untouched (see ImportConfig).
             KillTimer(hwnd, IDT_SAVE);
             if (!g_skipSaveOnExit) SaveWindowPlacement(hwnd);
+            KdxLinkStop();
             g_calibrator.cancel(); // its destructor joins the worker
             StopHotkeyCapture();
             CloseSwitcherHook();

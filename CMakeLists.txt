@@ -17,20 +17,24 @@ configure_file(cmake/version.h.in ${GEN_DIR}/version.h @ONLY)
 
 # Both WebView2 pages share common.css/common.js, inlined at build time so
 # the embedded pages stay self-contained (NavigateToString can't reference
-# files). fonts.css / icons.js are generated assets (see
-# tools/gen_assets.py) inlined into those two. Editing any input regenerates
+# files). kdx/ holds the KDX-UI charter (copied from the kdx-ui repository by
+# tools/charte-sync.mjs, never edited here); icons.js is generated (see
+# tools/gen_assets.py). Both are inlined into those two. Editing any input regenerates
 # the page and rebuilds the exe.
 set(ASSETS ${CMAKE_CURRENT_SOURCE_DIR}/assets)
+set(KDX ${CMAKE_CURRENT_SOURCE_DIR}/kdx)
 foreach(page ui options)
     add_custom_command(
         OUTPUT ${GEN_DIR}/${page}.gen.html
         COMMAND ${CMAKE_COMMAND}
             -DSRC=${ASSETS}/${page}.html -DDST=${GEN_DIR}/${page}.gen.html
             -DCSS=${ASSETS}/common.css -DJS=${ASSETS}/common.js
-            -DFONTS=${ASSETS}/fonts.css -DICONS=${ASSETS}/icons.js
+            -DFONTS=${KDX}/fonts.css -DKDXUI=${KDX}/kdx-ui.css
+            -DTHEMES=${KDX}/themes.css -DICONS=${ASSETS}/icons.js
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/InlineAssets.cmake
         DEPENDS ${ASSETS}/${page}.html ${ASSETS}/common.css ${ASSETS}/common.js
-                ${ASSETS}/fonts.css ${ASSETS}/icons.js
+                ${KDX}/fonts.css ${KDX}/kdx-ui.css ${KDX}/themes.css
+                ${ASSETS}/icons.js
                 ${CMAKE_CURRENT_SOURCE_DIR}/cmake/InlineAssets.cmake
         COMMENT "Inlining common assets into ${page}.html"
         VERBATIM)
@@ -51,6 +55,7 @@ add_executable(AudioLinker WIN32
     src/Panels.cpp
     src/Journal.cpp
     src/Tray.cpp
+    src/KdxLink.cpp
     src/DeviceManager.cpp
     src/AudioEngine.cpp
     src/Calibrator.cpp
@@ -79,6 +84,7 @@ set(WEBVIEW2_NATIVE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/webview2/build/nativ
 
 target_include_directories(AudioLinker PRIVATE
     include
+    ${CMAKE_CURRENT_SOURCE_DIR}   # for "kdx/kdx_bus.h"
     ${GEN_DIR}
     ${WEBVIEW2_NATIVE}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/json)

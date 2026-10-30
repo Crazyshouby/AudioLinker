@@ -11,17 +11,13 @@
   display: grid; gap: 10px; padding: 12px 14px 14px; align-content: start; overflow-y: auto; flex: 1;
 }
 .grip-rz { display: block; }
-#app::-webkit-scrollbar { width: 10px; }
-#app::-webkit-scrollbar-track { background: #333; box-shadow: inset 1px 0 0 #000; }
-#app::-webkit-scrollbar-thumb { background: var(--btn); border: 1px solid #000; border-radius: 2px; box-shadow: var(--bevel); }
 .row > label { width: auto; flex: 1; color: var(--text); cursor: pointer; }
-.ghost-btn { padding: 4px 12px; }
 h3.sec {
-  font-size: 12px; font-weight: 700; color: var(--text); text-align: center;
-  margin: 8px 0 0; padding: 3px 8px; background: var(--title); border: 1px solid #000; text-shadow: 0 1px 0 #000;
+  font: inherit; color: var(--text); text-align: center;
+  margin: 8px 0 0; padding: 3px 8px; background: var(--tb-grad); border: 1px solid #000; text-shadow: 0 1px 0 #000;
 }
 h3.sec:first-child { margin-top: 0; }
-.help { font-size: 11.5px; color: var(--faint); font-weight: 600; line-height: 1.45; cursor: default; }
+.help { font-family: var(--font-log); color: var(--faint); line-height: 1.45; cursor: default; }
 .footer-row { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
 </style>
 </head>
@@ -105,8 +101,8 @@ h3.sec:first-child { margin-top: 0; }
   <div class="help">L'export contient tout (setups, enceintes, raccourcis, réglages). La réinitialisation ne touche qu'aux options de cette fenêtre.</div>
 
   <div class="row footer-row">
-    <label id="versionLabel" class="mono" style="cursor:default;font-size:11.5px;color:var(--green)"></label>
-    <button class="ghost-btn" id="openLogBtn" style="font-size:11.5px;padding:4px 10px">
+    <label id="versionLabel" class="mono" style="cursor:default;color:var(--green)"></label>
+    <button class="ghost-btn" id="openLogBtn" style="padding:4px 10px">
       Ouvrir le journal de diagnostic</button>
   </div>
 </div>

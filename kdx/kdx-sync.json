@@ -1,0 +1,25 @@
+{
+  "kdxUi": "1.0.0",
+  "files": {
+    "kdx/kdx-ui.css": {
+      "from": "kdx-ui.css",
+      "sha256": "f1a7588db2ce8b8496999762a2b8e414c3309a19ff57a6e6d4f05c07a4cfda7a"
+    },
+    "kdx/themes.css": {
+      "from": "themes.css",
+      "sha256": "36d5fc8e9b28459cf890700d128ad50daabe9c2047bf83a489445bdff538c336"
+    },
+    "kdx/fonts.css": {
+      "from": "fonts.css",
+      "sha256": "42e6d1d1f8f7268a15631b5d982fc41a9080665140bfc3d844f88480ecdca0c7"
+    },
+    "kdx/kdx_bus.h": {
+      "from": "kdx_bus.h",
+      "sha256": "634c1a6438138a3b14716f331ad1c86c3b9020b4678f07cf0170c3c4b0cead85"
+    },
+    "tools/kdx-verify.mjs": {
+      "from": "kdx-verify.mjs",
+      "sha256": "49afd3380630058abf08a44d3f84632054db182fce837d9eeb791fbf270dbe1a"
+    }
+  }
+}

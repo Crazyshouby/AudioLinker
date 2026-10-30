@@ -7,7 +7,7 @@ const $ = s => document.querySelector(s);
 const bridge = window.chrome && window.chrome.webview;
 const post = m => { if (bridge) bridge.postMessage(m); };
 
-// The look is fixed (see common.css): no theme override, no Windows accent.
+// The look is the KDX-UI charter (see common.css): no theme override, no Windows accent.
 
 // Which window this page is (set by the native side before the page runs):
 // launcher, outputs, setups, levels, journal, options -- or "all" in a plain
@@ -26,7 +26,7 @@ function paintRange(el) {
   const min = +el.min, max = +el.max, v = +el.value;
   const p = ((v - min) / (max - min)) * 100;
   el.style.background =
-    `linear-gradient(#e83c3c, #c01010 45%, #8a0202) 0 0 / ${p}% 100% no-repeat, var(--track-off)`;
+    `var(--bar) 0 0 / ${p}% 100% no-repeat, var(--frame)`;
 }
 
 // Transient messages stacked at the bottom of the window (#toasts): up to
@@ -111,7 +111,12 @@ initChrome();
 
 // Messages every window understands: whether Windows has activated it (the
 // red frame) and whether it is rolled up. True = handled.
+// The accent of the KDX suite (%APPDATA%\KDX\suite.json): the page takes the theme of themes.css of that name.
+const applySuiteAccent = a => { if (a) document.documentElement.dataset.theme = a; };
+
 function chromeMessage(m) {
+  if (m.type === "theme") { applySuiteAccent(m.value); return true; }
+  if (m.type === "state" && m.suiteAccent) applySuiteAccent(m.suiteAccent); // and the page still handles the state itself
   if (m.type === "active") { document.body.classList.toggle("active", !!m.value); return true; }
   if (m.type === "shade") { document.body.classList.toggle("shaded", !!m.value); return true; }
   return false;

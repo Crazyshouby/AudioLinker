@@ -13,10 +13,7 @@ PARTS = [
     ("Microsoft Edge WebView2 SDK (chargeur statique)", "third_party/webview2/LICENSE.txt",
      "Le programme affiche son interface avec le runtime Microsoft Edge WebView2, installé séparément."),
     ("Microsoft Edge WebView2 SDK, mentions", "third_party/webview2/NOTICE.txt", ""),
-    ("Archivo (police de l'interface)", "third_party/fonts/OFL-Archivo.txt",
-     "Police intégrée à l'interface, sous SIL Open Font License 1.1."),
-    ("Overpass Mono (police des consoles)", "third_party/fonts/OFL-OverpassMono.txt",
-     "Police intégrée à l'interface, sous SIL Open Font License 1.1."),
+    ("Police de l'interface (KIRC Pixel)", "third_party/fonts/NOTICE-KDX-PIXEL.txt", ""),
 ]
 
 out = ["MENTIONS LÉGALES ET LICENCES DES COMPOSANTS TIERS",
@@ -25,8 +22,9 @@ out = ["MENTIONS LÉGALES ET LICENCES DES COMPOSANTS TIERS",
        "AudioLinker inclut ou utilise les composants suivants. Leur texte de licence",
        "est reproduit tel quel ci-dessous.",
        "",
-       "L'interface s'inspire visuellement du logiciel KDX (Haxial). Aucune ressource",
-       "de KDX (image, police, fichier d'apparence) n'est reprise : tout est redessiné.",
+       "L'interface reprend l'apparence du logiciel KDX (Haxial) par la charte kdx-ui. Aucune",
+       "image ni fichier d'apparence de KDX n'est repris ; pour la police, voir sa mention ci-dessous.",
+       "KDX est une marque de Haxial ; AudioLinker n'est lié à Haxial d'aucune façon.",
        "VB-CABLE (VB-Audio) n'est pas fourni avec AudioLinker : il s'installe séparément.",
        ""]
 for title, path, note in PARTS:

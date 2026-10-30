@@ -7,76 +7,19 @@
 /*@common.css@*/
 #app { height: 100%; }
 
-/* Scroll bars: dark track, bevelled thumb, small arrow buttons. */
-::-webkit-scrollbar { width: 11px; height: 11px; }
-::-webkit-scrollbar-track { background: #333; box-shadow: inset 1px 0 0 #000; }
-::-webkit-scrollbar-thumb { background: var(--btn); border: 1px solid #000; border-radius: 2px; box-shadow: var(--bevel); }
-::-webkit-scrollbar-corner { background: #333; }
-::-webkit-scrollbar-button:single-button {
-  display: block; width: 11px; height: 11px; background-color: #3a3a3a; background-repeat: no-repeat; background-position: center;
-  border: 1px solid #000; box-shadow: var(--bevel);
-}
-::-webkit-scrollbar-button:vertical:start:decrement { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='5'%3E%3Cpath d='M0 5h7L3.5 0z' fill='%23fff'/%3E%3C/svg%3E"); }
-::-webkit-scrollbar-button:vertical:end:increment { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='5'%3E%3Cpath d='M0 0h7L3.5 5z' fill='%23fff'/%3E%3C/svg%3E"); }
-::-webkit-scrollbar-button:horizontal:start:decrement { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='5' height='7'%3E%3Cpath d='M5 0v7L0 3.5z' fill='%23fff'/%3E%3C/svg%3E"); }
-::-webkit-scrollbar-button:horizontal:end:increment { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='5' height='7'%3E%3Cpath d='M0 0v7l5-3.5z' fill='%23fff'/%3E%3C/svg%3E"); }
-
-/* Orbs: round status lamps (blue/green = ok, amber = busy, grey = off). */
-.orb {
-  width: 11px; height: 11px; border-radius: 50%; flex: none; background: radial-gradient(circle at 35% 30%, #8a8a8a, #3a3a3a 60%, #1c1c1c);
-}
-.orb.green { background: radial-gradient(circle at 35% 30%, #8af08a, #18a828 55%, #0a5a14); }
-.orb.amber { background: radial-gradient(circle at 35% 30%, #ffe090, #faa320 55%, #b05a00); }
-
 /* ---------- Header ---------- */
-/* Status readout: a black console strip with a red frame. */
-.status {
-  display: flex; align-items: center; gap: 8px; min-width: 0; background: var(--ink);
-  border: 2px solid var(--red-frame); padding: 5px 9px; color: var(--green);
-  font: 600 12px "Overpass Mono", Consolas, monospace; font-stretch: 100%;
-}
-.status > span:last-child { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.status .dot { width: 11px; height: 11px; border-radius: 50%; flex: none; background: radial-gradient(circle at 35% 30%, #8a8a8a, #3a3a3a 60%, #1c1c1c); }
-.status.on .dot { background: radial-gradient(circle at 35% 30%, #8af08a, #18a828 55%, #0a5a14); }
-.status.busy .dot { background: radial-gradient(circle at 35% 30%, #ffe090, #faa320 55%, #b05a00); animation: pulse 1s ease-in-out infinite; }
-@keyframes pulse { 50% { opacity: 0.4; } }
-
-/* The one primary action: red bar while stopped, plain grey while running
-   (stopping is the quiet, deliberate gesture). */
-#toggleBtn {
-  position: relative; font: inherit; font-weight: 700; color: #fff; cursor: pointer; min-width: 150px; height: 30px;
-  background: var(--btn); border: 1px solid #000; border-radius: 3px; padding: 0 16px;
-  /* The default button of a KDX dialog: red double ring around the bevel. */
-  box-shadow: var(--bevel), 0 0 0 1px #000, 0 0 0 2px #cc0000, 0 0 0 3px #880000, 0 0 0 4px #000;
-  margin: 0 4px;
-}
-#toggleBtn:hover { background: #3b3b3b; }
-#toggleBtn:active { background: #2a2a2a; }
-#toggleBtn:disabled { cursor: default; color: #7a7a7a; }
-#toggleBtn:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
+/* The one primary action: the charter's default button (red double ring) while stopped, plain grey
+   while running (stopping is the quiet, deliberate gesture). The spinner is the charter's amber lamp. */
+#toggleBtn { min-width: 150px; height: 22px; }
 #toggleBtn.stop { box-shadow: var(--bevel); }
-#toggleBtn .spin {
-  display: none; width: 11px; height: 11px; border-radius: 50%;
-  border: 2px solid rgba(255,255,255,0.35); border-top-color: #fff;
-  animation: rot 0.8s linear infinite; margin-right: 8px; vertical-align: -2px;
-}
-@keyframes rot { to { transform: rotate(360deg); } }
+#toggleBtn .spin { display: none; margin-right: 8px; vertical-align: -1px; }
 #toggleBtn.starting .spin { display: inline-block; }
-
-.icon-btn {
-  flex: none; width: 30px; height: 30px; cursor: pointer; display: grid; place-items: center; padding: 0;
-  background: var(--btn); border: 1px solid #000; border-radius: 3px; box-shadow: var(--bevel);
-}
-.icon-btn:hover { background: #3b3b3b; }
-.icon-btn:focus-visible { outline: 2px solid var(--warn); outline-offset: 2px; }
-.icon-btn.on { background: #2a2a2a; box-shadow: var(--bevel-down); }
 
 /* Persistent notice under the header (source lost, audio left the group...)
    -- unlike a toast, it stays as long as the condition does. */
 #banner {
   display: flex; align-items: center; gap: 12px; flex: none; background: var(--ink);
   border: 2px solid var(--red-frame); color: var(--warn); padding: 6px 11px;
-  font: 600 12px/1.4 "Overpass Mono", Consolas, monospace; font-stretch: 100%;
 }
 #banner[hidden] { display: none; }
 #banner .banner-text { flex: 1; min-width: 0; }
@@ -89,7 +32,6 @@
 
 /* ---------- Device list ---------- */
 #devicesCard > .cb { gap: 8px; }
-.list { flex: 1; min-height: 0; overflow-y: auto; background: var(--panel); border: 1px solid #000; box-shadow: 0 1px 0 #555; }
 #devicesToolbar { flex: none; flex-wrap: nowrap; }
 #devicesToolbar #sMasterVol { min-width: 0; }
 #devicesToolbar label { width: auto; flex: none; }
@@ -97,16 +39,16 @@
 /* Sorties / Entrées tabs: two joined bevel buttons, the active one pressed. */
 .seg-tabs { display: flex; flex: none; gap: 0; }
 .seg-tab {
-  font: inherit; font-weight: 700; color: var(--text); cursor: pointer; padding: 3px 14px; min-height: 22px;
+  font: inherit; color: var(--text); cursor: pointer; padding: 3px 14px; min-height: 22px;
   background: var(--btn); border: 1px solid #000; box-shadow: var(--bevel);
 }
-.seg-tab:first-child { border-radius: 3px 0 0 3px; }
-.seg-tab:last-child { border-radius: 0 3px 3px 0; }
 .seg-tab:hover { background: #3b3b3b; }
-.seg-tab.active { background: #2a2a2a; box-shadow: var(--bevel-down); }
+.seg-tab.active { background: var(--card-2); box-shadow: var(--bevel-down); }
 
-/* INPUTS tab: single choice + hint line under the list */
-.chk.radio .box { border-radius: 50%; }
+/* INPUTS tab: single choice + hint line under the list. The radio is the charter's check box
+   with a square dot instead of the tick. */
+.switch.radio .track::after { left: 3px; top: 3px; width: 6px; height: 6px; border: 0; background: #fff; transform: scale(0); }
+.switch.radio input:checked + .track::after { transform: scale(1); }
 .badge.default { color: var(--green); }
 #inputList input[type="range"] { flex: none; width: 84px; }
 #inputList .val { width: 44px; }
@@ -115,59 +57,42 @@
 .mic-mute.on { color: var(--red); }
 #inputsHint {
   flex: none; padding-top: 6px; border-top: 1px solid var(--line);
-  color: var(--faint); font-size: 11.5px; font-weight: 600; line-height: 1.5;
+  color: var(--faint); font-family: var(--font-log); line-height: 1.5;
 }
-.empty { color: var(--faint); text-align: center; padding: 28px 12px; font-size: 12px; font-weight: 600; }
+.empty { color: var(--faint); text-align: center; padding: 28px 12px; }
 
-/* Rows: ruled lines; hover = peach, selected = navy, custom colour = left bar. */
+/* Rows: ruled lines; hover = lighter grey, selected = outlined, custom colour = left bar. */
 .device {
   display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 6px; border-left: 6px solid transparent;
   border-bottom: 1px solid var(--line); cursor: pointer; outline: none;
 }
 .device[style*="--dev-color"] { border-left-color: var(--dev-color); }
-.device:hover { background: var(--accent-2); color: var(--hover-fg); }
-.device:focus-visible { outline: 2px solid var(--warn); outline-offset: -2px; }
-.device.sel { background: var(--sel-bg); color: var(--sel-fg); }
-.device.is-muted { background: var(--away-bg); color: var(--faint); }
-.device.is-muted.sel { background: var(--sel-bg); }
+.device:hover { background: var(--row-hover); }
+.device:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+.device.sel { background: var(--row-sel); box-shadow: inset 0 0 0 1px var(--row-sel-ring); }
+.device.is-muted { background: var(--card-2); color: var(--faint); }
+.device.is-muted.sel { background: var(--row-sel); }
 .device.sel.open { border-bottom-color: transparent; }
 .device.dragging { opacity: 0.4; }
-.device:hover .badge, .setup:hover .badge { color: var(--hover-fg); border-color: #c89060; background: #ffddb8; }
-.device:hover .grip, .setup:hover .setup-ico { color: var(--hover-fg); }
+.device:hover .grip, .setup:hover .setup-ico { color: var(--text); }
 
 .grip {
   flex: none; width: 12px; text-align: center; color: var(--faint);
-  font-size: 13px; line-height: 1; cursor: grab; user-select: none;
+  line-height: 1; cursor: grab; user-select: none;
   opacity: 0; transition: opacity 0.12s;
 }
 .device:hover .grip { opacity: 1; }
 .grip:active { cursor: grabbing; }
 
-.chk { position: relative; flex: none; width: 16px; height: 16px; cursor: pointer; }
-.chk input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
-.chk .box {
-  position: absolute; inset: 0; background: var(--ink); pointer-events: none;
-  border: 1px solid var(--lo); border-bottom-color: #5a5a5a; border-right-color: #5a5a5a;
-}
-.chk input:checked + .box { background: var(--bar); border-color: #000; border-bottom-color: #ff8a74; border-right-color: #ff8a74; }
-.chk .box::after {
-  content: ""; position: absolute; left: 4.5px; top: 1px; width: 4px; height: 8px;
-  border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg) scale(0);
-}
-.chk input:checked + .box::after { transform: rotate(45deg) scale(1); }
-.chk input:focus-visible + .box { outline: 2px solid var(--warn); outline-offset: 1px; }
-
 .dev-main { flex: 1; min-width: 0; }
 .dev-name-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .dev-kind { flex: none; line-height: 0; }
 .dev-kind svg { display: block; }
-.dev-name { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.dev-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .device.is-muted .dev-name { color: var(--faint); }
-.device.sel .dev-name { color: var(--sel-fg); }
 .name-edit {
   width: 100%; background: var(--ink); border: 2px solid var(--red-frame);
-  color: var(--green); font: 600 12px "Overpass Mono", Consolas, monospace; font-stretch: 100%;
-  padding: 2px 6px; outline: none; caret-color: #e83c3c;
+  color: var(--green); padding: 2px 6px; outline: none; caret-color: var(--bar-top);
 }
 .name-edit::placeholder { color: var(--faint); }
 
@@ -186,18 +111,18 @@
 }
 #ctxMenu.show { display: block; }
 .ctx-title {
-  font-size: 11px; color: var(--faint); padding: 4px 8px 6px; background: var(--title); margin: -6px -6px 4px; color: #fff; text-shadow: 0 1px 0 #000;
+  padding: 4px 8px 6px; background: var(--tb-grad); margin: -6px -6px 4px; color: #fff; text-shadow: 0 1px 0 #000;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center;
 }
-.ctx-item { display: flex; align-items: center; gap: 8px; padding: 5px 8px; font-size: 12px; color: var(--text); cursor: pointer; }
+.ctx-item { display: flex; align-items: center; gap: 8px; padding: 5px 8px; color: var(--text); cursor: pointer; }
 .ctx-item:hover { background: var(--sel-bg); color: var(--sel-fg); }
 .ctx-check { width: 14px; flex: none; color: var(--green); text-align: center; }
 .ctx-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ctx-sep { height: 1px; background: var(--line); margin: 4px 6px; }
 .ctx-auto { cursor: default; gap: 10px; }
 .ctx-auto:hover { background: transparent; color: var(--text); }
-.ctx-auto-label { flex: none; width: 86px; font-size: 12px; color: var(--muted); }
-.ctx-select { flex: 1; min-width: 0; padding: 3px 6px; font-size: 12px; }
+.ctx-auto-label { flex: none; width: 86px; color: var(--muted); }
+.ctx-select { flex: 1; min-width: 0; padding: 3px 6px; }
 .ctx-swatches { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 8px 8px; }
 .ctx-swatch { width: 20px; height: 20px; border: 2px solid #000; padding: 0; cursor: pointer; box-shadow: 0 0 0 1px #5a5a5a; }
 .ctx-swatch.sel { border-color: #fff; }
@@ -209,8 +134,8 @@
 
 .dev-meta { display: flex; gap: 5px; margin-top: 3px; flex-wrap: wrap; }
 .badge {
-  font: 600 10.5px/1.3 "Overpass Mono", Consolas, monospace; font-stretch: 100%; color: var(--muted);
-  background: #2a2a2a; border: 1px solid var(--lo); border-bottom-color: #5a5a5a; border-right-color: #5a5a5a; padding: 0 5px;
+  font-family: var(--font-log); color: var(--muted);
+  background: var(--card-2); border: 1px solid var(--lo); border-bottom-color: #5a5a5a; border-right-color: #5a5a5a; padding: 0 5px;
 }
 .badge.glitch { color: var(--warn); }
 .badge.lost { color: var(--red); }
@@ -219,12 +144,10 @@
 
 .dev-right { flex: none; display: flex; align-items: center; gap: 8px; width: 120px; }
 .dev-right.wide { width: auto; } /* inputs rows: slider + value + mute + VU */
-.act-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: radial-gradient(circle at 35% 30%, #6a6a6a, #333 60%, #1c1c1c); }
-.device.active .act-dot { background: radial-gradient(circle at 35% 30%, #8af08a, #18a828 55%, #0a5a14); }
 /* Level meter: same bar as the transfer bars of KDX; amber near clipping. */
-.vu { flex: 1; height: 9px; background: var(--track-off); border: 1px solid #0c0c0c; overflow: hidden; }
+.vu { flex: 1; height: 9px; background: var(--frame); border: 1px solid #0c0c0c; overflow: hidden; }
 .vu-fill { height: 100%; width: 0%; background: var(--bar); transition: width 0.08s linear; }
-.vu-fill.hot { background: linear-gradient(#ffb347, #f58a1a 45%, #b85a00); }
+.vu-fill.hot { background: var(--warn); }
 
 /* ---------- Modals ---------- */
 .modal {
@@ -234,42 +157,35 @@
 .modal.show { opacity: 1; pointer-events: auto; }
 .modal-panel {
   width: 460px; max-width: calc(100vw - 40px); max-height: 80%; overflow-y: auto;
-  background: #880000; border: 1px solid #000; box-shadow: var(--ring-focus), 6px 8px 0 rgba(0, 0, 0, 0.55); padding: 0 5px 5px;
+  background: var(--a-mid); border: 1px solid #000; box-shadow: var(--ring-focus), 6px 8px 0 rgba(0, 0, 0, 0.55); padding: 0 5px 5px;
 }
 .modal-head {
   display: flex; align-items: center; justify-content: center; position: relative; height: 21px;
-  margin: 0 -5px 4px; background: var(--title-focus); border-bottom: 1px solid #440000;
+  margin: 0 -5px 4px; background: var(--title-focus); border-bottom: 1px solid var(--a-dark);
 }
-.modal-head h2 { font-size: 12px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70%; }
+.modal-head h2 { font: inherit; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70%; }
 .modal-close {
   position: absolute; left: 4px; top: 4px; width: 14px; height: 14px; border: 1px solid #fff; background: transparent;
-  color: #fff; font: 800 10px/1 "Archivo", sans-serif; cursor: pointer; padding: 0; display: grid; place-items: center;
+  color: #fff; font: inherit; line-height: 1; cursor: pointer; padding: 0; display: grid; place-items: center;
 }
 .modal-close:hover { background: #fff; color: #000; }
 .modal-body { background: var(--panel); padding: 12px; }
-.confirm-text { font-size: 12.5px; font-weight: 600; color: var(--muted); line-height: 1.5; user-select: none; }
+.confirm-text { color: var(--muted); line-height: 1.5; user-select: none; }
 .confirm-text b { color: var(--text); }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .confirm-actions .ghost-btn { padding: 5px 16px; }
-.danger-btn {
-  font: inherit; font-weight: 700; color: #fff; cursor: pointer; padding: 5px 16px; min-height: 24px;
-  background: var(--btn); border: 1px solid #000; border-radius: 3px;
-  box-shadow: var(--bevel), 0 0 0 1px #000, 0 0 0 2px #cc0000, 0 0 0 3px #880000, 0 0 0 4px #000; margin: 0 4px;
-}
-.danger-btn:hover { background: #3b3b3b; }
+.danger-btn { padding: 5px 16px; min-height: 24px; }
 
 .row > label { width: 68px; flex: none; color: var(--text); }
 
 /* Segmented choice (channel): joined bevel buttons, the chosen one pressed. */
 .seg { display: flex; gap: 0; }
 .seg button {
-  font: inherit; font-weight: 700; color: var(--text); cursor: pointer; padding: 3px 14px; min-height: 22px;
+  font: inherit; color: var(--text); cursor: pointer; padding: 3px 14px; min-height: 22px;
   background: var(--btn); border: 1px solid #000; box-shadow: var(--bevel);
 }
-.seg button:first-child { border-radius: 3px 0 0 3px; }
-.seg button:last-child { border-radius: 0 3px 3px 0; }
 .seg button:hover { background: #3b3b3b; }
-.seg button.on { background: #2a2a2a; box-shadow: var(--bevel-down); }
+.seg button.on { background: var(--card-2); box-shadow: var(--bevel-down); }
 
 /* ---------- Speaker sheet (opens in place, under the selected row) ---------- */
 #sheet {
@@ -284,15 +200,15 @@
 #eqFlow { position: absolute; inset: 0; height: 130px; display: block; pointer-events: none; }
 #eqCurve { position: absolute; inset: 0; display: block; touch-action: none; }
 .eq-zero-line { stroke: #5a5a5a; stroke-width: 1; stroke-dasharray: 3 3; }
-.eq-fill { fill: #e83c3c; opacity: 0.2; }
-.eq-path { fill: none; stroke: #e83c3c; stroke-width: 2; }
+.eq-fill { fill: var(--bar-top); opacity: 0.2; }
+.eq-path { fill: none; stroke: var(--bar-top); stroke-width: 2; }
 .eq-point { fill: #c8c8c8; stroke: #000; stroke-width: 2; cursor: ns-resize; }
 .eq-point:hover, .eq-point.dragging { fill: #fff; }
-.eq-freq-label { fill: var(--faint); font-size: 10px; text-anchor: middle; }
-.eq-db-value { fill: #00ff00; font: 600 10px "Overpass Mono", Consolas, monospace; text-anchor: middle; font-variant-numeric: tabular-nums; }
+.eq-freq-label { fill: var(--faint); font: 14px var(--font-log); text-anchor: middle; }
+.eq-db-value { fill: var(--green); font: 14px var(--font-log); text-anchor: middle; font-variant-numeric: tabular-nums; }
 #eqControls { display: grid; gap: 10px; margin-top: 10px; grid-template-columns: minmax(0, 1fr); }
 #eqControls > .row { min-width: 0; }
-.sheet-hint { font-size: 11px; font-weight: 600; color: var(--faint); margin-top: 2px; }
+.sheet-hint { color: var(--faint); font-family: var(--font-log); margin-top: 2px; }
 
 /* ---------- Setups ---------- */
 #setupsCard > .cb { gap: 8px; }
@@ -301,27 +217,25 @@
   display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 6px; border-left: 4px solid transparent;
   border-bottom: 1px solid var(--line); cursor: pointer; outline: none;
 }
-.setup:hover { background: var(--accent-2); color: var(--hover-fg); }
-.setup:focus-visible { outline: 2px solid var(--warn); outline-offset: -2px; }
-/* Playing = black row, red bar and red text; selected (loaded) = navy. */
-.setup.playing { border-left-color: #da0000; background: var(--ink); color: var(--red); }
-.setup.playing:hover { background: var(--accent-2); color: var(--hover-fg); }
-.setup.on, .setup.on:hover, .setup.playing.on { background: var(--sel-bg); color: var(--sel-fg); }
+.setup:hover { background: var(--row-hover); }
+.setup:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+/* Playing = black row, red bar and red text; selected (loaded) = outlined. */
+.setup.playing { border-left-color: var(--a-edge); background: var(--ink); color: var(--red); }
+.setup.playing:hover { background: var(--row-hover); }
+.setup.on, .setup.on:hover, .setup.playing.on { background: var(--row-sel); box-shadow: inset 0 0 0 1px var(--row-sel-ring); color: var(--text); }
 .setup-play {
   flex: none; width: 26px; height: 24px; cursor: pointer; display: grid; place-items: center; color: var(--text);
-  background: var(--btn); border: 1px solid #000; border-radius: 3px; box-shadow: var(--bevel);
+  background: var(--btn); border: 1px solid #000; box-shadow: var(--bevel);
 }
 .setup-play:hover { background: #3b3b3b; }
-.setup-play.playing { background: #2a2a2a; box-shadow: var(--bevel-down); color: var(--red); }
-.setup-ico {
-  flex: none; min-width: 26px; color: var(--faint); font: 600 11px "Overpass Mono", Consolas, monospace; font-stretch: 100%;
-}
+.setup-play.playing { background: var(--card-2); box-shadow: var(--bevel-down); color: var(--red); }
+.setup-ico { flex: none; min-width: 26px; color: var(--faint); font-family: var(--font-log); }
 .setup.on .setup-ico, .setup.playing .setup-ico { color: inherit; }
 .setup-main { flex: 1; min-width: 0; }
-.setup-name { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.setup-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Count + badges: wrap as whole items onto a second line when the row is
    narrow, never break "1 enceinte" or a badge in two, never overlap. */
-.setup-sub { display: flex; flex-wrap: wrap; gap: 3px 5px; align-items: center; margin-top: 3px; font-size: 10.5px; font-weight: 600; color: var(--faint); }
+.setup-sub { display: flex; flex-wrap: wrap; gap: 3px 5px; align-items: center; margin-top: 3px; font-family: var(--font-log); color: var(--faint); }
 .setup-sub > * { white-space: nowrap; }
 .setup.on .setup-sub, .setup.playing .setup-sub { color: inherit; }
 .badge.playing { color: var(--green); }
@@ -332,29 +246,16 @@
 .setup-save { flex: none; width: 26px; height: 24px; min-height: 0; padding: 0; display: grid; place-items: center; }
 .setup-del {
   position: absolute; top: 1px; right: 1px; z-index: 1; border: 0; background: transparent; color: var(--faint);
-  width: 16px; height: 16px; cursor: pointer; font-size: 10px; line-height: 1; opacity: 0; transition: opacity 0.12s;
+  width: 16px; height: 16px; cursor: pointer; line-height: 1; opacity: 0; transition: opacity 0.12s;
 }
 .setup:hover .setup-del, .setup:focus-within .setup-del { opacity: 1; }
 .setup-del:hover { color: var(--red); }
 .setup-form { display: flex; gap: 8px; flex: none; }
 
-/* ---------- Text inputs: black field, red frame, green text ---------- */
-.text-input {
-  flex: 1; min-width: 0; background: var(--ink); border: 2px solid #111;
-  color: var(--green); padding: 4px 7px; font: 600 12px "Overpass Mono", Consolas, monospace; font-stretch: 100%;
-  outline: none; caret-color: #e83c3c;
-}
-.text-input:focus { border-color: var(--red-frame); }
-.text-input:disabled { opacity: 0.45; }
-.text-input::placeholder { color: var(--faint); }
-select.text-input {
-  background: var(--btn); border: 1px solid #000; box-shadow: var(--bevel);
-  color: var(--text); font: inherit; font-weight: 700; border-radius: 3px;
-}
 /* ---------- Mic calibration modal ---------- */
-.cal-row { display: flex; align-items: center; gap: 10px; padding: 5px 2px; font-size: 12.5px; }
+.cal-row { display: flex; align-items: center; gap: 10px; padding: 5px 2px; }
 .cal-row .cal-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cal-row .cal-status { flex: none; font: 600 12px "Overpass Mono", Consolas, monospace; font-stretch: 100%; color: var(--faint); font-variant-numeric: tabular-nums; }
+.cal-row .cal-status { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
 .cal-row.measuring .cal-status { color: var(--warn); }
 .cal-row.done .cal-status { color: var(--green); }
 .cal-row.failed .cal-status { color: var(--red); }
@@ -363,10 +264,10 @@ select.text-input {
 /* ---------- Footer (shortcut hints, bottom of the Setups window) ---------- */
 footer {
   flex: none; text-align: left; background: var(--ink); border: 2px solid var(--red-frame);
-  color: var(--green); padding: 4px 8px; font: 600 10.5px/1.5 "Overpass Mono", Consolas, monospace; font-stretch: 100%;
+  color: var(--green); padding: 4px 8px; font-family: var(--font-log); line-height: 1.5;
 }
 footer:empty { display: none; }
-footer kbd { background: var(--btn); border: 1px solid #000; box-shadow: var(--bevel); padding: 0 4px; font-size: 10px; color: var(--text); }
+footer kbd { background: var(--btn); border: 1px solid #000; box-shadow: var(--bevel); padding: 0 4px; color: var(--text); }
 
 /* ---------- Which window this page shows ---------- */
 .win { display: none; }
@@ -386,43 +287,39 @@ html[data-panel="outputs"] .grip-rz, html[data-panel="setups"] .grip-rz, html[da
 html[data-panel="journal"] .grip-rz, html[data-panel="all"] #devicesCard .grip-rz { display: block; }
 
 /* ---------- Launcher: the narrow button column of the main window ---------- */
-.launcher { background: #2a2a2a; gap: 6px; padding: 6px; }
-.launcher .status { padding: 5px 7px; font-size: 11px; }
+.launcher { background: var(--card-2); gap: 6px; padding: 6px; }
 .launcher .status > span:last-child { white-space: normal; overflow: visible; }
 .lbtns { display: flex; flex-direction: column; gap: 1px; }
 .lbtn {
   position: relative; display: flex; align-items: center; gap: 8px; height: 24px; padding: 0 8px; text-align: left;
-  font: inherit; font-weight: 700; color: var(--text); cursor: pointer; white-space: nowrap;
-  background: var(--btn); border: 1px solid #000; border-radius: 3px; box-shadow: var(--bevel);
+  font: inherit; color: var(--text); cursor: pointer; white-space: nowrap;
+  background: var(--btn); border: 1px solid #000; box-shadow: var(--bevel);
 }
 .lbtn:hover { background: #3b3b3b; }
-.lbtn:focus-visible { outline: 2px solid var(--warn); outline-offset: 1px; }
-.lbtn.on, .lbtn:active { background: #2a2a2a; box-shadow: var(--bevel-down); }
+.lbtn:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
+.lbtn.on, .lbtn:active { background: var(--card-2); box-shadow: var(--bevel-down); }
 .lbtn .orb { position: absolute; right: 8px; top: 6px; }
 .lbtn .orb[hidden] { display: none; }
-.lsel {
-  width: 100%; height: 24px; padding: 0 6px; font: inherit; font-weight: 700; color: var(--text); cursor: pointer;
-  background: var(--btn); border: 1px solid #000; border-radius: 3px; box-shadow: var(--bevel);
-}
-.lsel option { background: #2a2a2a; color: #fff; }
-.lsel:disabled { color: #7a7a7a; }
+.lsel { width: 100%; height: 24px; padding: 0 6px; cursor: pointer; }
+.lsel option { background: var(--card-2); color: #fff; }
+.lsel:disabled { color: var(--faint); }
 .launcher #toggleBtn { width: calc(100% - 8px); margin: 6px 4px; min-width: 0; }
-.counters { display: flex; justify-content: space-between; padding: 0 6px; margin-top: auto; color: var(--muted); font-size: 11px; }
-.launcher #banner { font-size: 11px; padding: 5px 7px; flex-wrap: wrap; }
+.counters { display: flex; justify-content: space-between; padding: 0 6px; margin-top: auto; color: var(--muted); font-family: var(--font-log); }
+.launcher #banner { padding: 5px 7px; flex-wrap: wrap; }
 
 /* ---------- Levels window (cf. KDX File Transfers) ---------- */
 .lvl { display: flex; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); align-items: flex-start; }
 .lvl-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.lvl-name { display: flex; align-items: center; gap: 6px; font-size: 12.5px; min-width: 0; }
+.lvl-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .lvl-name span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lvl-stat { font: 600 11px "Overpass Mono", Consolas, monospace; font-stretch: 100%; color: var(--green); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lvl-stat { font-family: var(--font-log); color: var(--green); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lvl.off .lvl-stat { color: var(--faint); }
 .lvl .vu { flex: none; }
 
 /* ---------- Journal window (cf. KDX News) ---------- */
 .journal { background: var(--ink); }
-.jr-h { background: #3a3a3a; color: var(--text); padding: 3px 7px; font: 600 11px/1.4 "Overpass Mono", Consolas, monospace; font-stretch: 100%; }
-.jr-b { background: var(--ink); color: #00ff00; padding: 5px 7px; font: 600 12px/1.4 "Overpass Mono", Consolas, monospace; font-stretch: 100%; white-space: pre-wrap; word-break: break-word; }
+.jr-h { background: var(--row-hover); color: var(--text); padding: 3px 7px; font-family: var(--font-log); line-height: 1.4; }
+.jr-b { background: var(--ink); color: var(--field-ink); padding: 5px 7px; font-family: var(--font-log); line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
 .jr.warn .jr-b { color: var(--warn); }
 .jr.err .jr-b { color: var(--red); }
 .jr-tools { display: flex; gap: 8px; flex: none; margin-top: 8px; }
@@ -445,7 +342,7 @@ html[data-panel="journal"] .grip-rz, html[data-panel="all"] #devicesCard .grip-r
         <button class="lbtn" data-open="levels"><span class="pix" data-ic="volume"></span>Niveaux</button>
         <button class="lbtn" data-open="journal"><span class="pix" data-ic="journal"></span>Journal<span class="orb amber" id="journalOrb" hidden></span></button>
       </div>
-      <button id="toggleBtn"><span class="spin"></span><span id="toggleLabel">Démarrer le groupe</span></button>
+      <button id="toggleBtn" class="primary"><span class="spin orb amber pulse"></span><span id="toggleLabel">Démarrer le groupe</span></button>
       <div class="lbtns">
         <button class="lbtn" id="muteBtn" title="Couper le son de tout le groupe (sans toucher aux réglages)"><span class="pix" id="muteIcon" data-ic="volume"></span><span id="muteLabel">Couper le son</span></button>
         <button class="lbtn" id="calLaunchBtn" title="Mesurer la latence de chaque enceinte avec un micro et les aligner"><span class="pix" data-ic="egaliseur"></span>Calage micro</button>
@@ -559,7 +456,7 @@ html[data-panel="journal"] .grip-rz, html[data-panel="all"] #devicesCard .grip-r
     <p id="confirmText" class="confirm-text"></p>
     <div class="confirm-actions">
       <button class="ghost-btn" id="confirmNo">Annuler</button>
-      <button class="danger-btn" id="confirmYes">Supprimer</button>
+      <button class="primary danger-btn" id="confirmYes">Supprimer</button>
     </div>
     </div>
   </div>
@@ -762,7 +659,7 @@ function renderList() {
     });
 
     const chk = document.createElement("label");
-    chk.className = "chk";
+    chk.className = "switch";
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.checked = d.checked;
@@ -775,7 +672,7 @@ function renderList() {
       renderHeader();
     });
     const box = document.createElement("span");
-    box.className = "box";
+    box.className = "track";
     chk.append(cb, box);
 
     const main = document.createElement("div");
@@ -822,7 +719,7 @@ function renderList() {
     const right = document.createElement("div");
     right.className = "dev-right";
     if (d.muted) row.classList.add("is-muted");
-    const dot = document.createElement("div"); dot.className = "act-dot";
+    const dot = document.createElement("div"); dot.className = "orb";
     const vu = document.createElement("div"); vu.className = "vu";
     const fill = document.createElement("div"); fill.className = "vu-fill";
     vu.appendChild(fill);
@@ -838,7 +735,7 @@ function renderList() {
     makeRowKeyboardable(row, () => selectDevice(d.id === selectedId ? null : d.id), () => cb.click());
     list.appendChild(row);
 
-    rowRefs.set(d.id, { row, fill, glitch: bGl, lag: bLag, badges: { ch: bCh, vol: bVol, lat: bLat, src: bSrc } });
+    rowRefs.set(d.id, { row, dot, fill, glitch: bGl, lag: bLag, badges: { ch: bCh, vol: bVol, lat: bLat, src: bSrc } });
     updateBadges(d);
   }
   placeSheet();
@@ -882,7 +779,7 @@ function renderInputs() {
     if (inp.muted) row.classList.add("is-muted");
 
     const chk = document.createElement("label");
-    chk.className = "chk radio";
+    chk.className = "switch radio";
     chk.title = "Micro de ce setup";
     const cb = document.createElement("input");
     cb.type = "checkbox";
@@ -895,7 +792,7 @@ function renderInputs() {
     const pick = () => { post(`setupmic|${inp.id}`); markModified(); };
     cb.addEventListener("click", ev => { ev.preventDefault(); ev.stopPropagation(); pick(); });
     const box = document.createElement("span");
-    box.className = "box";
+    box.className = "track";
     chk.append(cb, box);
 
     const main = document.createElement("div");
@@ -1741,6 +1638,7 @@ function applyStatus(m) {
       if (st.sourceLost && d) lostNames.push(displayName(d));
       r.wasActive = st.active;
       r.row.classList.toggle("active", st.active);
+      r.dot.classList.toggle("green", !!st.active);
       // Glitches: ring underruns + hard drift corrections since the start.
       const g = (st.underruns || 0) + (st.drift || 0);
       r.glitch.classList.toggle("lost", !!st.sourceLost);
