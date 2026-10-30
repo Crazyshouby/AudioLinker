@@ -261,12 +261,17 @@ input[type="range"]:focus-visible { outline: var(--focus-ring); outline-offset: 
 .row-item .count.hot { background: var(--a-edge); }
 .empty { color: var(--faint); text-align: center; padding: 22px 12px; font-weight: 600; }
 /* En-tête de colonne : un bouton carré qui trie ; la colonne triée porte un petit triangle. */
-.lhead { display: grid; flex: none; padding-right: 15px; margin-bottom: 3px; }
+.lhead { display: grid; grid-template-columns: var(--kdx-cols, none); flex: none; padding-right: 15px; margin-bottom: 3px; }   /* --kdx-cols : kdx-columns.js */
 .lh {
   white-space: nowrap; overflow: hidden; font: inherit; font-weight: 700; color: var(--text); text-align: left; padding: 0 8px; height: 22px; cursor: pointer;
   background: var(--btn); border: 1px solid #000; border-radius: 0; box-shadow: var(--bevel);
 }
 .lh:hover { background: #3b3b3b; }
+.lh { position: relative; }
+/* poignées de colonne (kdx-columns.js) : une bande sur le bord droit de chaque en-tête, qui s'éclaire au survol et pendant qu'on la tire */
+.kdx-colrz { position: absolute; top: 0; right: 0; bottom: 0; width: 7px; cursor: col-resize; z-index: 2; touch-action: none; }
+.kdx-colrz:hover, .kdx-colrz.drag { box-shadow: inset -2px 0 0 var(--a-edge); }
+body.kdx-colsizing, body.kdx-colsizing * { cursor: col-resize !important; user-select: none; }
 .lh.on::after { content: ""; display: inline-block; margin-left: 7px; vertical-align: middle; border: 4px solid transparent; border-top: 5px solid #fff; border-bottom: 0; }
 
 /* ================================================================ Onglets */
