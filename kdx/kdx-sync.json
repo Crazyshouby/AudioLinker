@@ -3,7 +3,7 @@
   "files": {
     "kdx/kdx-ui.css": {
       "from": "kdx-ui.css",
-      "sha256": "958821e393649076e29a1c9fa038c644d3e503477e10761c1e56163d5fb8d762"
+      "sha256": "834d7f0ccc8dd23569465aa8c10a554d24cd1aaf065f96d59b15ea4e54ea1272"
     },
     "kdx/themes.css": {
       "from": "themes.css",
