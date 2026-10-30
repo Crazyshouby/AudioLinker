@@ -67,57 +67,20 @@ function toast(msg, kind, action) {
 }
 
 // ---------- Window chrome (title bar buttons, drag, resize grip) ----------
-// The native side owns the window: the page only asks. data-act="close"
-// closes this window (the launcher: hides everything to the tray),
-// data-act="shade" rolls it up to its title bar; data-glyph picks the icon.
-const TB_GLYPHS = {
-  x: '<svg viewBox="0 0 9 9"><path d="M1 1L8 8M8 1L1 8" stroke="#fff" stroke-width="2" fill="none"/></svg>',
-  minus: '<svg viewBox="0 0 9 9"><path d="M1 4.5H8" stroke="#fff" stroke-width="2" fill="none"/></svg>',
-};
-function initChrome() {
-  for (const tb of document.querySelectorAll(".tb")) {
-    // Moving: the page reports press / movement / release, the native side
-    // reads the cursor and moves the window (a system move loop would take
-    // the mouse over and the page would never see the second press of a
-    // double click). Two presses within 400 ms roll the window up or down.
-    let lastDown = 0, dragging = false, moveQueued = false;
-    tb.addEventListener("pointerdown", ev => {
-      if (ev.button !== 0 || ev.target.closest(".tb-btn")) return;
-      const now = performance.now();
-      if (now - lastDown < 400) { lastDown = 0; post("shade"); return; }
-      lastDown = now;
-      dragging = true;
-      tb.setPointerCapture(ev.pointerId);
-      post("dragstart");
-    });
-    tb.addEventListener("pointermove", () => {
-      if (!dragging || moveQueued) return;
-      moveQueued = true;
-      requestAnimationFrame(() => { moveQueued = false; if (dragging) post("dragmove"); });
-    });
-    const endDrag = () => { if (dragging) { dragging = false; post("dragend"); } };
-    tb.addEventListener("pointerup", endDrag);
-    tb.addEventListener("pointercancel", endDrag);
-    for (const b of tb.querySelectorAll(".tb-btn")) {
-      b.innerHTML = TB_GLYPHS[b.dataset.glyph] || TB_GLYPHS.minus;
-      b.addEventListener("click", () => post(b.dataset.act === "close" ? "closepanel" : "shade"));
-    }
-  }
-  for (const g of document.querySelectorAll(".grip-rz")) {
-    g.addEventListener("mousedown", ev => { if (ev.button === 0) post("resizewin"); });
-  }
-}
-initChrome();
+// The frame is kdx-frame.js, shared by the whole KDX suite, talking to the native side through kdx-bridge.js (its "strings" transport, selected
+// by data-kdx-host="strings" on <html>: dragstart / dragmove / dragend, resizewin, shade, closepanel). The native side owns the window: the page
+// only asks. data-act="close" closes this window (the launcher: hides everything to the tray), "shade" rolls it up to its title bar.
+/*@kdx-bridge.js@*/
+/*@kdx-frame.js@*/
+KdxFrame.init();
 
-// Messages every window understands: whether Windows has activated it (the
-// red frame) and whether it is rolled up. True = handled.
 // The accent of the KDX suite (%APPDATA%\KDX\suite.json): the page takes the theme of themes.css of that name.
-const applySuiteAccent = a => { if (a) document.documentElement.dataset.theme = a; };
+const applySuiteAccent = a => { if (a) KdxFrame.applyTheme(a); };
 
+// Messages every window understands. "active" (Windows has activated the window: the red frame), "shade" (rolled up) and "theme" (the suite's
+// accent changed) are handled by kdx-frame.js, which listens to the same messages: true = nothing more for the page to do with them.
 function chromeMessage(m) {
-  if (m.type === "theme") { applySuiteAccent(m.value); return true; }
+  if (m.type === "active" || m.type === "shade" || m.type === "theme") return true;
   if (m.type === "state" && m.suiteAccent) applySuiteAccent(m.suiteAccent); // and the page still handles the state itself
-  if (m.type === "active") { document.body.classList.toggle("active", !!m.value); return true; }
-  if (m.type === "shade") { document.body.classList.toggle("shaded", !!m.value); return true; }
   return false;
 }

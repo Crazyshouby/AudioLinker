@@ -20,6 +20,18 @@
     "tools/kdx-verify.mjs": {
       "from": "kdx-verify.mjs",
       "sha256": "49afd3380630058abf08a44d3f84632054db182fce837d9eeb791fbf270dbe1a"
+    },
+    "kdx/kdx-bridge.js": {
+      "from": "kdx-bridge.js",
+      "sha256": "d0a8277cc6521032429352f127186a631d04d7ba52041bd2c4630f0323261121"
+    },
+    "kdx/kdx-frame.js": {
+      "from": "kdx-frame.js",
+      "sha256": "c746e2a6f9925c217e36501a11316dbbeae86dcbfacc4e50cc3ae8de2ee7dac6"
+    },
+    "kdx/kdx-frame.css": {
+      "from": "kdx-frame.css",
+      "sha256": "db5aa659a691053fd4e4cb0790c0075a1f17c43e612d85ce8839c8eaacab2264"
     }
   }
 }

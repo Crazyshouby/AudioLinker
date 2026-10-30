@@ -9,9 +9,10 @@
 # the exe.
 #
 # Args: -DSRC=<page.html> -DDST=<page.gen.html> -DCSS=<common.css> -DJS=<common.js>
-#       -DFONTS=<kdx/fonts.css> -DKDXUI=<kdx/kdx-ui.css> -DTHEMES=<kdx/themes.css> -DICONS=<icons.js>
+#       -DFONTS=<kdx/fonts.css> -DKDXUI=<kdx/kdx-ui.css> -DTHEMES=<kdx/themes.css> -DFRAMECSS=<kdx/kdx-frame.css>
+#       -DBRIDGE=<kdx/kdx-bridge.js> -DFRAMEJS=<kdx/kdx-frame.js> -DICONS=<icons.js>
 
-foreach(var SRC DST CSS JS FONTS KDXUI THEMES ICONS)
+foreach(var SRC DST CSS JS FONTS KDXUI THEMES FRAMECSS BRIDGE FRAMEJS ICONS)
     if(NOT DEFINED ${var})
         message(FATAL_ERROR "InlineAssets: missing -D${var}")
     endif()
@@ -23,10 +24,16 @@ file(READ "${JS}" js)
 file(READ "${FONTS}" fonts)
 file(READ "${KDXUI}" kdxui)
 file(READ "${THEMES}" themes)
+file(READ "${FRAMECSS}" framecss)
+file(READ "${BRIDGE}" bridge)
+file(READ "${FRAMEJS}" framejs)
 file(READ "${ICONS}" icons)
 string(REPLACE "/*@fonts.css@*/" "${fonts}" css "${css}")
 string(REPLACE "/*@kdx-ui.css@*/" "${kdxui}" css "${css}")
 string(REPLACE "/*@themes.css@*/" "${themes}" css "${css}")
+string(REPLACE "/*@kdx-frame.css@*/" "${framecss}" css "${css}")
+string(REPLACE "/*@kdx-bridge.js@*/" "${bridge}" js "${js}")
+string(REPLACE "/*@kdx-frame.js@*/" "${framejs}" js "${js}")
 string(REPLACE "/*@icons.js@*/" "${icons}" js "${js}")
 
 string(FIND "${html}" "/*@common.css@*/" css_pos)

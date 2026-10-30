@@ -1,0 +1,19 @@
+/* kdx-frame.css -- ce que kdx-frame.js ajoute au cadre de kdx-ui.css : poignées de bord, voile des dialogues, correctif des fenêtres imbriquées. */
+
+/* Une fenêtre inactive posée dans une fenêtre active (aperçu, carte d'Alt+Tab, boîte de dialogue) ne doit pas hériter des jetons de titre de l'accent :
+   ces jetons sont hérités par le CSS. Le correctif redonne leurs gris aux fenêtres non actives : celles d'une page dont le corps n'est pas actif, et celles posées dans une autre fenêtre.
+   (Dans KIRC et AudioLinker la fenêtre active est body.active : une fenêtre de premier niveau n'est jamais forcée au gris tant que le corps est actif.) */
+body:not(.active) .win:not(.active), .win .win:not(.active) { --tb-edge: #555555; --tb-low: #222222; --tb-grad: linear-gradient(#0c0c0c, #222222 47%, #8f8f8f); --tbb-fill: #444444; --tbb-hi: #8a8a8a; --tbb-lo: #222222; }
+
+/* Poignées de redimensionnement des fenêtres sans cadre système : un fin liseré invisible sur chaque bord et chaque coin (data-e = code HT de Windows). */
+.rz { position: fixed; z-index: 60; }
+.rz.l { left: 0; top: 8px; bottom: 8px; width: 4px; cursor: ew-resize; }  .rz.r { right: 0; top: 8px; bottom: 8px; width: 4px; cursor: ew-resize; }
+.rz.t { top: 0; left: 8px; right: 8px; height: 3px; cursor: ns-resize; } .rz.b { bottom: 0; left: 8px; right: 8px; height: 4px; cursor: ns-resize; }
+.rz.tl { left: 0; top: 0; width: 8px; height: 8px; cursor: nwse-resize; }  .rz.br { right: 0; bottom: 0; width: 10px; height: 10px; cursor: nwse-resize; }
+.rz.tr { right: 0; top: 0; width: 8px; height: 8px; cursor: nesw-resize; } .rz.bl { left: 0; bottom: 0; width: 8px; height: 8px; cursor: nesw-resize; }
+
+/* Boîte de dialogue modale (KdxFrame.dialog) : un voile sombre, une fenêtre active au centre. */
+.veil { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; background: rgba(0, 0, 0, .5); }
+.veil .win { position: relative; inset: auto; width: 420px; max-width: calc(100vw - 24px); }
+.veil .dlg-body { display: flex; align-items: center; gap: 14px; padding: 10px 4px; }
+.veil .dlg-text { line-height: 1.5; }

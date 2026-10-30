@@ -30,10 +30,12 @@ foreach(page ui options)
             -DSRC=${ASSETS}/${page}.html -DDST=${GEN_DIR}/${page}.gen.html
             -DCSS=${ASSETS}/common.css -DJS=${ASSETS}/common.js
             -DFONTS=${KDX}/fonts.css -DKDXUI=${KDX}/kdx-ui.css
-            -DTHEMES=${KDX}/themes.css -DICONS=${ASSETS}/icons.js
+            -DTHEMES=${KDX}/themes.css -DFRAMECSS=${KDX}/kdx-frame.css
+            -DBRIDGE=${KDX}/kdx-bridge.js -DFRAMEJS=${KDX}/kdx-frame.js -DICONS=${ASSETS}/icons.js
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/InlineAssets.cmake
         DEPENDS ${ASSETS}/${page}.html ${ASSETS}/common.css ${ASSETS}/common.js
                 ${KDX}/fonts.css ${KDX}/kdx-ui.css ${KDX}/themes.css
+                ${KDX}/kdx-frame.css ${KDX}/kdx-bridge.js ${KDX}/kdx-frame.js
                 ${ASSETS}/icons.js
                 ${CMAKE_CURRENT_SOURCE_DIR}/cmake/InlineAssets.cmake
         COMMENT "Inlining common assets into ${page}.html"
