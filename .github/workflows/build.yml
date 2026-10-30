@@ -55,6 +55,11 @@ jobs:
         shell: pwsh
         run: node tools/kdx-verify.mjs kdx/kdx-sync.json
 
+      # The pages follow the charter rules (CHARTE.md section 8); the copies in kdx/ are checked at the source.
+      - name: Pages follow the charter
+        shell: pwsh
+        run: node tools/charte-lint.mjs assets --manifest kdx/kdx-sync.json
+
       # Generated files are committed: regenerating them must change nothing.
       - name: Generated assets are up to date
         shell: pwsh

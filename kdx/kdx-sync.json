@@ -36,6 +36,18 @@
     "kdx/kdx-frame.css": {
       "from": "kdx-frame.css",
       "sha256": "db5aa659a691053fd4e4cb0790c0075a1f17c43e612d85ce8839c8eaacab2264"
+    },
+    "kdx/tokens.json": {
+      "from": "tokens.json",
+      "sha256": "e744d691da0c9f7c27bcc8bc30d7a38bd02a9796f917683922b7460c71568a21"
+    },
+    "tools/charte-lint.mjs": {
+      "from": "charte-lint.mjs",
+      "sha256": "aaf8b59230f88d937c65d95af9a68e4fdeca960176ef7d78ea32354f9b3cb648"
+    },
+    "tools/lib/lint.mjs": {
+      "from": "lint.mjs",
+      "sha256": "9b8c53ef75faeb6a56854a13c69f54bffa83ea759956d2ab5222603fa14110a7"
     }
   }
 }
