@@ -21,6 +21,10 @@
       "from": "kdx-verify.mjs",
       "sha256": "49afd3380630058abf08a44d3f84632054db182fce837d9eeb791fbf270dbe1a"
     },
+    "tools/pixel_engine.py": {
+      "from": "pixel_engine.py",
+      "sha256": "a74d283820c38ea1dbbd3fd0fd85d02a6ccfaa37122fcee34d10e410f4ff8e9c"
+    },
     "kdx/kdx-bridge.js": {
       "from": "kdx-bridge.js",
       "sha256": "d0a8277cc6521032429352f127186a631d04d7ba52041bd2c4630f0323261121"

@@ -76,7 +76,7 @@ L'interface reprend le thème et l'organisation de KDX (Haxial) : un menu princi
 
 - `assets/common.css` : jetons de couleur et widgets partagés par les deux pages. Les valeurs viennent de l'apparence par défaut de KDX, relevées pixel par pixel sur les captures sans perte de sa documentation (fenêtre active rouge, barres de titre en dégradé, relief des boutons, rangées bleu marine et pêche). Aucun fichier de KDX n'est repris : tout est redessiné.
 - `kdx/` : la charte graphique KDX-UI (`kdx-ui.css`, `themes.css`, `fonts.css`) et le client du bus de la suite (`kdx_bus.h`), copiée **telle quelle** depuis le dépôt `kdx-ui` par `node tools/charte-sync.mjs --write audiolinker` (ne jamais la modifier ici ; `--check` vérifie qu'elle est à jour).
-- `assets/icons.js` : ressource **générée** (pictogrammes propres à AudioLinker). Elle est versionnée ; le build n'exécute pas Python. Pour la régénérer : `python tools/gen_assets.py`. Les pictogrammes sont dessinés dans `tools/pixel_icons.py`.
+- `assets/icons.js` : ressource **générée** (pictogrammes propres à AudioLinker). Elle est versionnée ; le build n'exécute pas Python. Pour la régénérer : `python tools/gen_assets.py`. Les pictogrammes sont dessinés dans `tools/pixel_icons.py`, sur le moteur commun `tools/pixel_engine.py` (copie de kdx-ui, ne pas modifier ici).
 
 ## Signature de code
 

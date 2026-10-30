@@ -6,71 +6,7 @@ writes them into assets/icons.js.
 """
 import math
 
-PAL = {'K': '#000000', 'Y': '#fcc21c', 'y': '#c4840c', 'W': '#fff6dc', 'w': '#f4f4f4', 'g': '#c8c8c8', 'G': '#8c8c8c',
-       'd': '#4a4a4a', 'D': '#2a2a2a', 'R': '#e02020', 'r': '#8a0202', 'O': '#f58a1a', 'o': '#b85a00',
-       'B': '#2a5ae0', 'b': '#86a6ff', 'N': '#0a1a80', 'L': '#3ccf3c', 'l': '#0a7a14'}
-
-
-class C:
-    def __init__(s):
-        s.p = {}
-
-    def set(s, x, y, c):
-        if 0 <= x < 16 and 0 <= y < 16:
-            s.p[(x, y)] = c
-
-    def rect(s, x0, y0, x1, y1, c):
-        for y in range(y0, y1 + 1):
-            for x in range(x0, x1 + 1):
-                s.set(x, y, c)
-
-    def circ(s, cx, cy, r, c):
-        for y in range(16):
-            for x in range(16):
-                if (x - cx) ** 2 + (y - cy) ** 2 <= r * r:
-                    s.set(x, y, c)
-
-    def line(s, x0, y0, x1, y1, c):
-        n = max(abs(x1 - x0), abs(y1 - y0)) or 1
-        for i in range(n + 1):
-            s.set(round(x0 + (x1 - x0) * i / n), round(y0 + (y1 - y0) * i / n), c)
-
-    def pat(s, x0, y0, rows):
-        for j, row in enumerate(rows):
-            for i, ch in enumerate(row):
-                if ch != '.':
-                    s.set(x0 + i, y0 + j, ch)
-
-    def outline(s):
-        add = {}
-        for (x, y), c in s.p.items():
-            if c == 'K':
-                continue
-            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                q = (x + dx, y + dy)
-                if q not in s.p and 0 <= q[0] < 16 and 0 <= q[1] < 16:
-                    add[q] = 'K'
-        s.p.update(add)
-        return s
-
-    def svg(s):
-        by = {}
-        for y in range(16):
-            x = 0
-            while x < 16:
-                c = s.p.get((x, y))
-                if c is None:
-                    x += 1
-                    continue
-                x2 = x
-                while x2 + 1 < 16 and s.p.get((x2 + 1, y)) == c:
-                    x2 += 1
-                w = x2 - x + 1
-                by.setdefault(c, []).append(f'M{x} {y}h{w}v1h-{w}z')
-                x = x2 + 1
-        paths = ''.join(f'<path fill="{PAL[c]}" d="{"".join(d)}"/>' for c, d in by.items())
-        return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" '
-                f'shape-rendering="crispEdges">{paths}</svg>')
+from pixel_engine import C, PAL  # noqa: F401  (copie de kdx-ui/gen/pixel_engine.py)
 
 
 def speaker():
@@ -212,4 +148,4 @@ ICONS = dict(enceinte=speaker, casque=headphones, bluetooth=btspeaker, ecran=mon
 
 
 def all_svgs():
-    return {name: draw().svg() for name, draw in ICONS.items()}
+    return {name: draw().svg({}) for name, draw in ICONS.items()}
