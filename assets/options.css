@@ -1,0 +1,15 @@
+/* Styles of options.html (the shared ones are common.css, the KDX-UI charter is kdx/). Inlined into the page at build time. */
+/* The page is one KDX window (frame and title bar from common.css); each
+   section heading is a small title bar of its own. */
+#app {
+  display: grid; gap: 10px; padding: 12px 14px 14px; align-content: start; overflow-y: auto; flex: 1;
+}
+.grip-rz { display: block; }
+.row > label { width: auto; flex: 1; color: var(--text); cursor: pointer; }
+h3.sec {
+  font: inherit; color: var(--text); text-align: center;
+  margin: 8px 0 0; padding: 3px 8px; background: var(--tb-grad); border: 1px solid #000; text-shadow: 0 1px 0 #000;
+}
+h3.sec:first-child { margin-top: 0; }
+.help { font-family: var(--font-log); color: var(--faint); line-height: 1.45; cursor: default; }
+.footer-row { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line); }

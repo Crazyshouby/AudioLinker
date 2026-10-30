@@ -15,9 +15,9 @@ set(GEN_DIR ${CMAKE_BINARY_DIR}/gen)
 file(MAKE_DIRECTORY ${GEN_DIR})
 configure_file(cmake/version.h.in ${GEN_DIR}/version.h @ONLY)
 
-# Both WebView2 pages share common.css/common.js, inlined at build time so
-# the embedded pages stay self-contained (NavigateToString can't reference
-# files). kdx/ holds the KDX-UI charter (copied from the kdx-ui repository by
+# Each WebView2 page is three files (assets/<page>.html markup, .css, .js) plus the
+# common.css/common.js both share, inlined at build time so the embedded pages stay
+# self-contained (NavigateToString can't reference files). kdx/ holds the KDX-UI charter (copied from the kdx-ui repository by
 # tools/charte-sync.mjs, never edited here); icons.js is generated (see
 # tools/gen_assets.py). Both are inlined into those two. Editing any input regenerates
 # the page and rebuilds the exe.
@@ -32,8 +32,9 @@ foreach(page ui options)
             -DFONTS=${KDX}/fonts.css -DKDXUI=${KDX}/kdx-ui.css
             -DTHEMES=${KDX}/themes.css -DFRAMECSS=${KDX}/kdx-frame.css
             -DBRIDGE=${KDX}/kdx-bridge.js -DFRAMEJS=${KDX}/kdx-frame.js -DICONS=${ASSETS}/icons.js
+            -DPAGECSS=${ASSETS}/${page}.css -DPAGEJS=${ASSETS}/${page}.js
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/InlineAssets.cmake
-        DEPENDS ${ASSETS}/${page}.html ${ASSETS}/common.css ${ASSETS}/common.js
+        DEPENDS ${ASSETS}/${page}.html ${ASSETS}/${page}.css ${ASSETS}/${page}.js ${ASSETS}/common.css ${ASSETS}/common.js
                 ${KDX}/fonts.css ${KDX}/kdx-ui.css ${KDX}/themes.css
                 ${KDX}/kdx-frame.css ${KDX}/kdx-bridge.js ${KDX}/kdx-frame.js
                 ${ASSETS}/icons.js

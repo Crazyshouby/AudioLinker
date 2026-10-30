@@ -65,7 +65,7 @@ ctest --test-dir build
 - `src/WasapiStream.cpp` — ouverture d'un flux partagé, négociation de format, conversions, période basse latence ; partagé par le moteur et le calibrateur.
 - `src/Calibrator.cpp` — calage micro : balayage sinusoïdal horodaté (QPC), détection par corrélation croisée.
 - `src/Config.cpp` — configuration JSON, migration INI, purge des périphériques fantômes.
-- `src/App.h` + `Gui.cpp`, `Group.cpp`, `Devices.cpp`, `SystemAudio.cpp`, `WebBridge.cpp`, `Hotkeys.cpp`, `Switcher.cpp`, `Optimizer.cpp`, `Tray.cpp` — interface Win32 + WebView2 (`assets/ui.html`, `assets/options.html`, parties communes `assets/common.*` inlinées au build), setups, routage par application, tray, hotkeys.
+- `src/App.h` + `Gui.cpp`, `Group.cpp`, `Devices.cpp`, `SystemAudio.cpp`, `WebBridge.cpp`, `Hotkeys.cpp`, `Switcher.cpp`, `Optimizer.cpp`, `Tray.cpp` — interface Win32 + WebView2 (pages `assets/ui.*` et `assets/options.*` — chacune en `.html` balisage, `.css` et `.js` —, parties communes `assets/common.*`, le tout inliné au build par `cmake/InlineAssets.cmake`), setups, routage par application, tray, hotkeys.
 - `src/Panels.cpp` — les fenêtres de l'interface : le menu principal (`Gui.cpp`) et une fenêtre sans bordure par fonction (sorties, setups, niveaux, journal, options), chacune avec son WebView2. La barre de titre est dessinée par la page ; le natif déplace, redimensionne, enroule et ferme à sa demande, et mémorise position, taille et ouverture de chaque fenêtre. `src/Journal.cpp` alimente la fenêtre Journal (le journal de diagnostic en direct).
 - `src/DeviceManager.cpp` — énumération MMDevice et notifications de branchement.
 - `tests/` — tests unitaires (ring buffer, resampler, biquad, config) lancés par `ctest` et par la CI.

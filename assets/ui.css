@@ -1,0 +1,319 @@
+/* Styles of ui.html (the shared ones are common.css, the KDX-UI charter is kdx/). Inlined into the page at build time. */
+#app { height: 100%; }
+
+/* ---------- Header ---------- */
+/* The one primary action: the charter's default button (red double ring) while stopped, plain grey
+   while running (stopping is the quiet, deliberate gesture). The spinner is the charter's amber lamp. */
+#toggleBtn { min-width: 150px; height: 22px; }
+#toggleBtn.stop { box-shadow: var(--bevel); }
+#toggleBtn .spin { display: none; margin-right: 8px; vertical-align: -1px; }
+#toggleBtn.starting .spin { display: inline-block; }
+
+/* Persistent notice under the header (source lost, audio left the group...)
+   -- unlike a toast, it stays as long as the condition does. */
+#banner {
+  display: flex; align-items: center; gap: 12px; flex: none; background: var(--ink);
+  border: 2px solid var(--red-frame); color: var(--warn); padding: 6px 11px;
+}
+#banner[hidden] { display: none; }
+#banner .banner-text { flex: 1; min-width: 0; }
+#banner .ghost-btn { flex: none; }
+
+/* ---------- Layout ---------- */
+/* Two-column landscape layout: setups on the left, the (growable) speaker
+   list -- with the selected speaker's sheet opened in place -- on the right. */
+.card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+
+/* ---------- Device list ---------- */
+#devicesCard > .cb { gap: 8px; }
+#devicesToolbar { flex: none; flex-wrap: nowrap; }
+#devicesToolbar #sMasterVol { min-width: 0; }
+#devicesToolbar label { width: auto; flex: none; }
+
+/* Sorties / Entrées tabs: two joined bevel buttons, the active one pressed. */
+.seg-tabs { display: flex; flex: none; gap: 0; }
+.seg-tab {
+  font: inherit; color: var(--text); cursor: pointer; padding: 3px 14px; min-height: 22px;
+  background: var(--btn); border: 1px solid #000; box-shadow: var(--bevel);
+}
+.seg-tab:hover { background: #3b3b3b; }
+.seg-tab.active { background: var(--card-2); box-shadow: var(--bevel-down); }
+
+/* INPUTS tab: single choice + hint line under the list. The radio is the charter's check box
+   with a square dot instead of the tick. */
+.switch.radio .track::after { left: 3px; top: 3px; width: 6px; height: 6px; border: 0; background: #fff; transform: scale(0); }
+.switch.radio input:checked + .track::after { transform: scale(1); }
+.badge.default { color: var(--green); }
+#inputList input[type="range"] { flex: none; width: 84px; }
+#inputList .val { width: 44px; }
+#inputList .vu { flex: none; width: 64px; }
+.mic-mute { flex: none; padding: 3px 5px; }
+.mic-mute.on { color: var(--red); }
+#inputsHint {
+  flex: none; padding-top: 6px; border-top: 1px solid var(--line);
+  color: var(--faint); font-family: var(--font-log); line-height: 1.5;
+}
+.empty { color: var(--faint); text-align: center; padding: 28px 12px; }
+
+/* Rows: ruled lines; hover = lighter grey, selected = outlined, custom colour = left bar. */
+.device {
+  display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 6px; border-left: 6px solid transparent;
+  border-bottom: 1px solid var(--line); cursor: pointer; outline: none;
+}
+.device[style*="--dev-color"] { border-left-color: var(--dev-color); }
+.device:hover { background: var(--row-hover); }
+.device:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+.device.sel { background: var(--row-sel); box-shadow: inset 0 0 0 1px var(--row-sel-ring); }
+.device.is-muted { background: var(--card-2); color: var(--faint); }
+.device.is-muted.sel { background: var(--row-sel); }
+.device.sel.open { border-bottom-color: transparent; }
+.device.dragging { opacity: 0.4; }
+.device:hover .grip, .setup:hover .setup-ico { color: var(--text); }
+
+.grip {
+  flex: none; width: 12px; text-align: center; color: var(--faint);
+  line-height: 1; cursor: grab; user-select: none;
+  opacity: 0; transition: opacity 0.12s;
+}
+.device:hover .grip { opacity: 1; }
+.grip:active { cursor: grabbing; }
+
+.dev-main { flex: 1; min-width: 0; }
+.dev-name-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.dev-kind { flex: none; line-height: 0; }
+.dev-kind svg { display: block; }
+.dev-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.device.is-muted .dev-name { color: var(--faint); }
+.name-edit {
+  width: 100%; background: var(--ink); border: 2px solid var(--red-frame);
+  color: var(--green); padding: 2px 6px; outline: none; caret-color: var(--bar-top);
+}
+.name-edit::placeholder { color: var(--faint); }
+
+/* Hover-only "identify" button on each speaker row (also in the menu). */
+.dev-id-btn {
+  flex: none; width: 24px; height: 22px; border: 1px solid transparent; background: transparent; cursor: pointer;
+  display: grid; place-items: center; opacity: 0; transition: opacity 0.12s;
+}
+.device:hover .dev-id-btn, .device:focus-within .dev-id-btn { opacity: 1; }
+.dev-id-btn:hover { background: var(--btn); border-color: #000; box-shadow: var(--bevel); }
+
+/* ---------- Per-speaker context menu (identify / mute / color / automation) ---------- */
+#ctxMenu {
+  position: fixed; z-index: 20; min-width: 240px; max-width: 340px; display: none;
+  background: var(--panel); border: 1px solid #000; box-shadow: var(--ring), 4px 5px 0 rgba(0, 0, 0, 0.5); padding: 6px;
+}
+#ctxMenu.show { display: block; }
+.ctx-title {
+  padding: 4px 8px 6px; background: var(--tb-grad); margin: -6px -6px 4px; color: #fff; text-shadow: 0 1px 0 #000;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center;
+}
+.ctx-item { display: flex; align-items: center; gap: 8px; padding: 5px 8px; color: var(--text); cursor: pointer; }
+.ctx-item:hover { background: var(--sel-bg); color: var(--sel-fg); }
+.ctx-check { width: 14px; flex: none; color: var(--green); text-align: center; }
+.ctx-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctx-sep { height: 1px; background: var(--line); margin: 4px 6px; }
+.ctx-auto { cursor: default; gap: 10px; }
+.ctx-auto:hover { background: transparent; color: var(--text); }
+.ctx-auto-label { flex: none; width: 86px; color: var(--muted); }
+.ctx-select { flex: 1; min-width: 0; padding: 3px 6px; }
+.ctx-swatches { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 8px 8px; }
+.ctx-swatch { width: 20px; height: 20px; border: 2px solid #000; padding: 0; cursor: pointer; box-shadow: 0 0 0 1px #5a5a5a; }
+.ctx-swatch.sel { border-color: #fff; }
+.ctx-swatch.none { background: var(--ink); position: relative; }
+.ctx-swatch.none::after {
+  content: ""; position: absolute; left: 2px; right: 2px; top: 50%; height: 2px;
+  background: var(--red); transform: rotate(-45deg);
+}
+
+.dev-meta { display: flex; gap: 5px; margin-top: 3px; flex-wrap: wrap; }
+.badge {
+  font-family: var(--font-log); color: var(--muted);
+  background: var(--card-2); border: 1px solid var(--lo); border-bottom-color: #5a5a5a; border-right-color: #5a5a5a; padding: 0 5px;
+}
+.badge.glitch { color: var(--warn); }
+.badge.lost { color: var(--red); }
+.badge.src { color: var(--accent-2); }
+.badge.lag { color: var(--faint); }
+
+.dev-right { flex: none; display: flex; align-items: center; gap: 8px; width: 120px; }
+.dev-right.wide { width: auto; } /* inputs rows: slider + value + mute + VU */
+/* Level meter: same bar as the transfer bars of KDX; amber near clipping. */
+.vu { flex: 1; height: 9px; background: var(--frame); border: 1px solid #0c0c0c; overflow: hidden; }
+.vu-fill { height: 100%; width: 0%; background: var(--bar); transition: width 0.08s linear; }
+.vu-fill.hot { background: var(--warn); }
+
+/* ---------- Modals ---------- */
+.modal {
+  position: fixed; inset: 0; z-index: 15; display: grid; place-items: center;
+  background: rgba(0, 0, 0, 0.6); opacity: 0; pointer-events: none; transition: opacity 0.15s;
+}
+.modal.show { opacity: 1; pointer-events: auto; }
+.modal-panel {
+  width: 460px; max-width: calc(100vw - 40px); max-height: 80%; overflow-y: auto;
+  background: var(--a-mid); border: 1px solid #000; box-shadow: var(--ring-focus), 6px 8px 0 rgba(0, 0, 0, 0.55); padding: 0 5px 5px;
+}
+.modal-head {
+  display: flex; align-items: center; justify-content: center; position: relative; height: 21px;
+  margin: 0 -5px 4px; background: var(--title-focus); border-bottom: 1px solid var(--a-dark);
+}
+.modal-head h2 { font: inherit; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70%; }
+.modal-close {
+  position: absolute; left: 4px; top: 4px; width: 14px; height: 14px; border: 1px solid #fff; background: transparent;
+  color: #fff; font: inherit; line-height: 1; cursor: pointer; padding: 0; display: grid; place-items: center;
+}
+.modal-close:hover { background: #fff; color: #000; }
+.modal-body { background: var(--panel); padding: 12px; }
+.confirm-text { color: var(--muted); line-height: 1.5; user-select: none; }
+.confirm-text b { color: var(--text); }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.confirm-actions .ghost-btn { padding: 5px 16px; }
+.danger-btn { padding: 5px 16px; min-height: 24px; }
+
+.row > label { width: 68px; flex: none; color: var(--text); }
+
+/* Segmented choice (channel): joined bevel buttons, the chosen one pressed. */
+.seg { display: flex; gap: 0; }
+.seg button {
+  font: inherit; color: var(--text); cursor: pointer; padding: 3px 14px; min-height: 22px;
+  background: var(--btn); border: 1px solid #000; box-shadow: var(--bevel);
+}
+.seg button:hover { background: #3b3b3b; }
+.seg button.on { background: var(--card-2); box-shadow: var(--bevel-down); }
+
+/* ---------- Speaker sheet (opens in place, under the selected row) ---------- */
+#sheet {
+  margin: 4px 4px 8px; padding: 10px 12px 12px; background: var(--panel);
+  border: 1px solid #000; box-shadow: 0 1px 0 #555, inset 0 1px 0 #444; cursor: default; color: var(--text);
+}
+#sheet[hidden] { display: none; }
+#eqCurveWrap { position: relative; height: 130px; background: var(--ink); border: 2px solid var(--red-frame); }
+/* Live 10-band spectrum behind the curve, from AudioEngine's real per-band
+   meter (see the JS comment above startEqFlow()) -- kept low-contrast so it
+   sits strictly behind the curve/points instead of competing with them. */
+#eqFlow { position: absolute; inset: 0; height: 130px; display: block; pointer-events: none; }
+#eqCurve { position: absolute; inset: 0; display: block; touch-action: none; }
+.eq-zero-line { stroke: #5a5a5a; stroke-width: 1; stroke-dasharray: 3 3; }
+.eq-fill { fill: var(--bar-top); opacity: 0.2; }
+.eq-path { fill: none; stroke: var(--bar-top); stroke-width: 2; }
+.eq-point { fill: #c8c8c8; stroke: #000; stroke-width: 2; cursor: ns-resize; }
+.eq-point:hover, .eq-point.dragging { fill: #fff; }
+.eq-freq-label { fill: var(--faint); font: 14px var(--font-log); text-anchor: middle; }
+.eq-db-value { fill: var(--green); font: 14px var(--font-log); text-anchor: middle; font-variant-numeric: tabular-nums; }
+#eqControls { display: grid; gap: 10px; margin-top: 10px; grid-template-columns: minmax(0, 1fr); }
+#eqControls > .row { min-width: 0; }
+.sheet-hint { color: var(--faint); font-family: var(--font-log); margin-top: 2px; }
+
+/* ---------- Setups ---------- */
+#setupsCard > .cb { gap: 8px; }
+.setup {
+  position: relative; /* anchors the delete button, which must not take row width */
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 6px; border-left: 4px solid transparent;
+  border-bottom: 1px solid var(--line); cursor: pointer; outline: none;
+}
+.setup:hover { background: var(--row-hover); }
+.setup:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+/* Playing = black row, red bar and red text; selected (loaded) = outlined. */
+.setup.playing { border-left-color: var(--a-edge); background: var(--ink); color: var(--red); }
+.setup.playing:hover { background: var(--row-hover); }
+.setup.on, .setup.on:hover, .setup.playing.on { background: var(--row-sel); box-shadow: inset 0 0 0 1px var(--row-sel-ring); color: var(--text); }
+.setup-play {
+  flex: none; width: 26px; height: 24px; cursor: pointer; display: grid; place-items: center; color: var(--text);
+  background: var(--btn); border: 1px solid #000; box-shadow: var(--bevel);
+}
+.setup-play:hover { background: #3b3b3b; }
+.setup-play.playing { background: var(--card-2); box-shadow: var(--bevel-down); color: var(--red); }
+.setup-ico { flex: none; min-width: 26px; color: var(--faint); font-family: var(--font-log); }
+.setup.on .setup-ico, .setup.playing .setup-ico { color: inherit; }
+.setup-main { flex: 1; min-width: 0; }
+.setup-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Count + badges: wrap as whole items onto a second line when the row is
+   narrow, never break "1 enceinte" or a badge in two, never overlap. */
+.setup-sub { display: flex; flex-wrap: wrap; gap: 3px 5px; align-items: center; margin-top: 3px; font-family: var(--font-log); color: var(--faint); }
+.setup-sub > * { white-space: nowrap; }
+.setup.on .setup-sub, .setup.playing .setup-sub { color: inherit; }
+.badge.playing { color: var(--green); }
+.badge.modified { color: var(--warn); }
+.badge.selected { color: var(--accent-2); }
+/* "Save changes": icon only (tooltip says where it saves), so the row keeps
+   its room for the name. */
+.setup-save { flex: none; width: 26px; height: 24px; min-height: 0; padding: 0; display: grid; place-items: center; }
+.setup-del {
+  position: absolute; top: 1px; right: 1px; z-index: 1; border: 0; background: transparent; color: var(--faint);
+  width: 16px; height: 16px; cursor: pointer; line-height: 1; opacity: 0; transition: opacity 0.12s;
+}
+.setup:hover .setup-del, .setup:focus-within .setup-del { opacity: 1; }
+.setup-del:hover { color: var(--red); }
+.setup-form { display: flex; gap: 8px; flex: none; }
+
+/* ---------- Mic calibration modal ---------- */
+.cal-row { display: flex; align-items: center; gap: 10px; padding: 5px 2px; }
+.cal-row .cal-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-row .cal-status { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
+.cal-row.measuring .cal-status { color: var(--warn); }
+.cal-row.done .cal-status { color: var(--green); }
+.cal-row.failed .cal-status { color: var(--red); }
+#calResults { margin-bottom: 4px; }
+
+/* ---------- Footer (shortcut hints, bottom of the Setups window) ---------- */
+footer {
+  flex: none; text-align: left; background: var(--ink); border: 2px solid var(--red-frame);
+  color: var(--green); padding: 4px 8px; font-family: var(--font-log); line-height: 1.5;
+}
+footer:empty { display: none; }
+footer kbd { background: var(--btn); border: 1px solid #000; box-shadow: var(--bevel); padding: 0 4px; color: var(--text); }
+
+/* ---------- Which window this page shows ---------- */
+.win { display: none; }
+html[data-panel="launcher"] #launcherWin,
+html[data-panel="outputs"] #devicesCard,
+html[data-panel="setups"] #setupsCard,
+html[data-panel="levels"] #levelsWin,
+html[data-panel="journal"] #journalWin,
+html[data-panel="all"] .win { display: flex; }
+/* Plain browser (tests): all windows side by side. */
+html[data-panel="all"] body { overflow: auto; }
+html[data-panel="all"] #app { display: flex; flex-wrap: wrap; gap: 14px; padding: 14px; height: auto; align-items: flex-start; }
+html[data-panel="all"] .win { width: 560px; height: 560px; }
+html[data-panel="all"] #launcherWin { width: 224px; height: 520px; }
+.grip-rz { display: none; }
+html[data-panel="outputs"] .grip-rz, html[data-panel="setups"] .grip-rz, html[data-panel="levels"] .grip-rz,
+html[data-panel="journal"] .grip-rz, html[data-panel="all"] #devicesCard .grip-rz { display: block; }
+
+/* ---------- Launcher: the narrow button column of the main window ---------- */
+.launcher { background: var(--card-2); gap: 6px; padding: 6px; }
+.launcher .status > span:last-child { white-space: normal; overflow: visible; }
+.lbtns { display: flex; flex-direction: column; gap: 1px; }
+.lbtn {
+  position: relative; display: flex; align-items: center; gap: 8px; height: 24px; padding: 0 8px; text-align: left;
+  font: inherit; color: var(--text); cursor: pointer; white-space: nowrap;
+  background: var(--btn); border: 1px solid #000; box-shadow: var(--bevel);
+}
+.lbtn:hover { background: #3b3b3b; }
+.lbtn:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
+.lbtn.on, .lbtn:active { background: var(--card-2); box-shadow: var(--bevel-down); }
+.lbtn .orb { position: absolute; right: 8px; top: 6px; }
+.lbtn .orb[hidden] { display: none; }
+.lsel { width: 100%; height: 24px; padding: 0 6px; cursor: pointer; }
+.lsel option { background: var(--card-2); color: #fff; }
+.lsel:disabled { color: var(--faint); }
+.launcher #toggleBtn { width: calc(100% - 8px); margin: 6px 4px; min-width: 0; }
+.counters { display: flex; justify-content: space-between; padding: 0 6px; margin-top: auto; color: var(--muted); font-family: var(--font-log); }
+.launcher #banner { padding: 5px 7px; flex-wrap: wrap; }
+
+/* ---------- Levels window (cf. KDX File Transfers) ---------- */
+.lvl { display: flex; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); align-items: flex-start; }
+.lvl-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.lvl-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.lvl-name span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lvl-stat { font-family: var(--font-log); color: var(--green); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lvl.off .lvl-stat { color: var(--faint); }
+.lvl .vu { flex: none; }
+
+/* ---------- Journal window (cf. KDX News) ---------- */
+.journal { background: var(--ink); }
+.jr-h { background: var(--row-hover); color: var(--text); padding: 3px 7px; font-family: var(--font-log); line-height: 1.4; }
+.jr-b { background: var(--ink); color: var(--field-ink); padding: 5px 7px; font-family: var(--font-log); line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
+.jr.warn .jr-b { color: var(--warn); }
+.jr.err .jr-b { color: var(--red); }
+.jr-tools { display: flex; gap: 8px; flex: none; margin-top: 8px; }
