@@ -1,17 +1,17 @@
-/* kdx-bridge.js -- le pont entre une page KDX et son application hôte.
+/* cdx-bridge.js -- le pont entre une page CDX et son application hôte.
    Un seul contrat de fenêtre (docs/CONTRAT-FENETRE.md), trois transports :
      tauri     KIRC : window.__TAURI__ (commandes win_ready / win_close / win_shade / win_zoom / win_drag, événements active / shade / theme)
      strings   AudioLinker : chaînes « cmd|arg|arg » par chrome.webview.postMessage (dragstart, dragmove, dragend, resizewin, shade, closepanel)
      webview2  les applications C# (shell, Explorateur, Navigateur) : objets JSON { cmd: "win.drag", ... } et messages { type, value }
-   Le transport est détecté ; <html data-kdx-host="strings"> force AudioLinker (impossible à distinguer d'un hôte JSON par détection).
-   Usage :  kdx.win.drag("start") · kdx.win.resize("start", 17) · kdx.win.close() · kdx.on("theme", name => ...) · kdx.send("ma-commande", { a: 1 }) */
+   Le transport est détecté ; <html data-cdx-host="strings"> force AudioLinker (impossible à distinguer d'un hôte JSON par détection).
+   Usage :  cdx.win.drag("start") · cdx.win.resize("start", 17) · cdx.win.close() · cdx.on("theme", name => ...) · cdx.send("ma-commande", { a: 1 }) */
 (() => {
   "use strict";
   const html = document.documentElement;
   const ts = window.__TAURI__, wv = window.chrome && window.chrome.webview;
-  const host = html.dataset.kdxHost || (ts && ts.core ? "tauri" : wv ? "webview2" : "none");
+  const host = html.dataset.cdxHost || (ts && ts.core ? "tauri" : wv ? "webview2" : "none");
   const listeners = {};
-  const emit = (type, value, raw) => (listeners[type] || []).slice().forEach(f => { try { f(value, raw); } catch (e) { console.error("kdx.on(" + type + ")", e); } });
+  const emit = (type, value, raw) => (listeners[type] || []).slice().forEach(f => { try { f(value, raw); } catch (e) { console.error("cdx.on(" + type + ")", e); } });
 
   let send, listen = () => { };           // listen(type) : s'abonne côté hôte quand le transport l'exige
   const win = {};
@@ -46,8 +46,8 @@
       resize: (phase, edge) => { if (phase === "start") post({ cmd: "win.resize", edge: edge || 17 }); },
     });
   } else {
-    send = (cmd, args) => console.debug("[kdx] (sans hôte)", cmd, args);
-    for (const k of ["ready", "close", "shade", "max", "min", "title", "drag", "resize"]) win[k] = (...a) => console.debug("[kdx] (sans hôte) win." + k, ...a);
+    send = (cmd, args) => console.debug("[cdx] (sans hôte)", cmd, args);
+    for (const k of ["ready", "close", "shade", "max", "min", "title", "drag", "resize"]) win[k] = (...a) => console.debug("[cdx] (sans hôte) win." + k, ...a);
   }
 
   if (host === "webview2" || host === "strings") {
@@ -58,7 +58,7 @@
     });
   }
 
-  window.kdx = {
+  window.cdx = {
     host, win, send,
     version: "1.0.0",
     on(type, fn) { if (!listeners[type]) { listeners[type] = []; listen(type); } listeners[type].push(fn); return () => this.off(type, fn); },

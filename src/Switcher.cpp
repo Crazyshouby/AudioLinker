@@ -141,7 +141,7 @@ void Paint(HWND wnd, HDC target) {
         RECT row = { m.padX, top, w - m.padX, top + m.rowH };
         bool cur = (i == g_index);
         if (cur) {
-            // KDX selected row: navy, square corners.
+            // CDX selected row: navy, square corners.
             HBRUSH b = CreateSolidBrush(RGB(0x00, 0x11, 0x77));
             FillRect(hdc, &row, b);
             DeleteObject(b);

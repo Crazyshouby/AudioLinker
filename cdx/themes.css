@@ -1,4 +1,4 @@
-/* Généré par gen/gen_tokens.py depuis tokens.json -- ne pas modifier. Une rampe d'accent par thème ; le rouge est le défaut du :root de kdx-ui.css. */
+/* Généré par gen/gen_tokens.py depuis tokens.json -- ne pas modifier. Une rampe d'accent par thème ; le rouge est le défaut du :root de cdx-ui.css. */
 
 html[data-theme="bleu"] {
   --a-edge: #0000ff; --a-mid: #0000aa; --a-dark: #000055; --a-hover: #000080;

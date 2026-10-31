@@ -17,26 +17,26 @@ configure_file(cmake/version.h.in ${GEN_DIR}/version.h @ONLY)
 
 # Each WebView2 page is three files (assets/<page>.html markup, .css, .js) plus the
 # common.css/common.js both share, inlined at build time so the embedded pages stay
-# self-contained (NavigateToString can't reference files). kdx/ holds the KDX-UI charter (copied from the kdx-ui repository by
+# self-contained (NavigateToString can't reference files). cdx/ holds the CDX-UI charter (copied from the cdx-ui repository by
 # tools/charte-sync.mjs, never edited here); icons.js is generated (see
 # tools/gen_assets.py). Both are inlined into those two. Editing any input regenerates
 # the page and rebuilds the exe.
 set(ASSETS ${CMAKE_CURRENT_SOURCE_DIR}/assets)
-set(KDX ${CMAKE_CURRENT_SOURCE_DIR}/kdx)
+set(CDX ${CMAKE_CURRENT_SOURCE_DIR}/cdx)
 foreach(page ui options)
     add_custom_command(
         OUTPUT ${GEN_DIR}/${page}.gen.html
         COMMAND ${CMAKE_COMMAND}
             -DSRC=${ASSETS}/${page}.html -DDST=${GEN_DIR}/${page}.gen.html
             -DCSS=${ASSETS}/common.css -DJS=${ASSETS}/common.js
-            -DFONTS=${KDX}/fonts.css -DKDXUI=${KDX}/kdx-ui.css
-            -DTHEMES=${KDX}/themes.css -DFRAMECSS=${KDX}/kdx-frame.css
-            -DBRIDGE=${KDX}/kdx-bridge.js -DFRAMEJS=${KDX}/kdx-frame.js -DICONS=${ASSETS}/icons.js
+            -DFONTS=${CDX}/fonts.css -DCDXUI=${CDX}/cdx-ui.css
+            -DTHEMES=${CDX}/themes.css -DFRAMECSS=${CDX}/cdx-frame.css
+            -DBRIDGE=${CDX}/cdx-bridge.js -DFRAMEJS=${CDX}/cdx-frame.js -DICONS=${ASSETS}/icons.js
             -DPAGECSS=${ASSETS}/${page}.css -DPAGEJS=${ASSETS}/${page}.js
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/InlineAssets.cmake
         DEPENDS ${ASSETS}/${page}.html ${ASSETS}/${page}.css ${ASSETS}/${page}.js ${ASSETS}/common.css ${ASSETS}/common.js
-                ${KDX}/fonts.css ${KDX}/kdx-ui.css ${KDX}/themes.css
-                ${KDX}/kdx-frame.css ${KDX}/kdx-bridge.js ${KDX}/kdx-frame.js
+                ${CDX}/fonts.css ${CDX}/cdx-ui.css ${CDX}/themes.css
+                ${CDX}/cdx-frame.css ${CDX}/cdx-bridge.js ${CDX}/cdx-frame.js
                 ${ASSETS}/icons.js
                 ${CMAKE_CURRENT_SOURCE_DIR}/cmake/InlineAssets.cmake
         COMMENT "Inlining common assets into ${page}.html"
@@ -58,7 +58,7 @@ add_executable(AudioLinker WIN32
     src/Panels.cpp
     src/Journal.cpp
     src/Tray.cpp
-    src/KdxLink.cpp
+    src/CdxLink.cpp
     src/DeviceManager.cpp
     src/AudioEngine.cpp
     src/Calibrator.cpp
@@ -87,7 +87,7 @@ set(WEBVIEW2_NATIVE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/webview2/build/nativ
 
 target_include_directories(AudioLinker PRIVATE
     include
-    ${CMAKE_CURRENT_SOURCE_DIR}   # for "kdx/kdx_bus.h"
+    ${CMAKE_CURRENT_SOURCE_DIR}   # for "cdx/cdx_bus.h"
     ${GEN_DIR}
     ${WEBVIEW2_NATIVE}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/json)

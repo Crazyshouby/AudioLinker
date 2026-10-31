@@ -4,8 +4,8 @@
 AudioLinker inclut ou utilise les composants suivants. Leur texte de licence
 est reproduit tel quel ci-dessous.
 
-L'interface reprend l'apparence du logiciel KDX (Haxial) par la charte kdx-ui. Aucune
-image ni fichier d'apparence de KDX n'est repris ; pour la police, voir sa mention ci-dessous.
+L'interface reprend l'apparence du logiciel KDX (Haxial) par la charte cdx-ui. Aucune
+image ni fichier d'apparence de CDX n'est repris ; pour la police, voir sa mention ci-dessous.
 KDX est une marque de Haxial ; AudioLinker n'est lié à Haxial d'aucune façon.
 VB-CABLE (VB-Audio) n'est pas fourni avec AudioLinker : il s'installe séparément.
 
@@ -193,7 +193,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ------------------------------------------------------------------------------
 Police de l'interface (KIRC Pixel)
 ------------------------------------------------------------------------------
-KIRC Pixel et KIRC Pixel Log (dépôt kdx-ui, outils/gen_font.py) reproduisent, pixel par pixel, les deux
+KIRC Pixel et KIRC Pixel Log (dépôt cdx-ui, outils/gen_font.py) reproduisent, pixel par pixel, les deux
 polices bitmap de l'interface de KDX (Haxial Software), relevées sur des captures d'écran de KDX 1.6 ; les
 glyphes que ces captures ne montrent pas ont été dessinés pour le projet. Les formes des lettres restent
 l'oeuvre de Haxial : leur redistribution relève de la décision de l'auteur d'AudioLinker. Aucune autre police

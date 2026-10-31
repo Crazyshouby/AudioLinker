@@ -1,4 +1,4 @@
-KIRC Pixel et KIRC Pixel Log (dépôt kdx-ui, outils/gen_font.py) reproduisent, pixel par pixel, les deux
+KIRC Pixel et KIRC Pixel Log (dépôt cdx-ui, outils/gen_font.py) reproduisent, pixel par pixel, les deux
 polices bitmap de l'interface de KDX (Haxial Software), relevées sur des captures d'écran de KDX 1.6 ; les
 glyphes que ces captures ne montrent pas ont été dessinés pour le projet. Les formes des lettres restent
 l'oeuvre de Haxial : leur redistribution relève de la décision de l'auteur d'AudioLinker. Aucune autre police

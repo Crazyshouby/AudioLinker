@@ -1,4 +1,4 @@
-/* kdx-frame.css -- ce que kdx-frame.js ajoute au cadre de kdx-ui.css : poignées de bord, voile des dialogues, correctif des fenêtres imbriquées. */
+/* cdx-frame.css -- ce que cdx-frame.js ajoute au cadre de cdx-ui.css : poignées de bord, voile des dialogues, correctif des fenêtres imbriquées. */
 
 /* Une fenêtre inactive posée dans une fenêtre active (aperçu, carte d'Alt+Tab, boîte de dialogue) ne doit pas hériter des jetons de titre de l'accent :
    ces jetons sont hérités par le CSS. Le correctif redonne leurs gris aux fenêtres non actives : celles d'une page dont le corps n'est pas actif, et celles posées dans une autre fenêtre.
@@ -12,7 +12,7 @@ body:not(.active) .win:not(.active), .win .win:not(.active) { --tb-edge: #555555
 .rz.tl { left: 0; top: 0; width: 8px; height: 8px; cursor: nwse-resize; }  .rz.br { right: 0; bottom: 0; width: 10px; height: 10px; cursor: nwse-resize; }
 .rz.tr { right: 0; top: 0; width: 8px; height: 8px; cursor: nesw-resize; } .rz.bl { left: 0; bottom: 0; width: 8px; height: 8px; cursor: nesw-resize; }
 
-/* Boîte de dialogue modale (KdxFrame.dialog) : un voile sombre, une fenêtre active au centre. */
+/* Boîte de dialogue modale (CdxFrame.dialog) : un voile sombre, une fenêtre active au centre. */
 .veil { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; background: rgba(0, 0, 0, .5); }
 .veil .win { position: relative; inset: auto; width: 420px; max-width: calc(100vw - 24px); }
 .veil .dlg-body { display: flex; align-items: center; gap: 14px; padding: 10px 4px; }

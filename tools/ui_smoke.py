@@ -19,7 +19,7 @@ window.addEventListener("error", e => window.__errors.push("error: " + e.message
 window.addEventListener("unhandledrejection", e => window.__errors.push("rejection: " + e.reason));
 window.chrome = { webview: {
   postMessage: m => window.__posted.push(m),
-  // Like WebView2, every listener hears every message (kdx-bridge.js listens beside the page).
+  // Like WebView2, every listener hears every message (cdx-bridge.js listens beside the page).
   addEventListener: (t, fn) => { (window.__handlers = window.__handlers || []).push(fn); window.__handler = m => window.__handlers.forEach(h => h(m)); } } };
 </script>"""
 
@@ -77,11 +77,11 @@ setTimeout(() => {
     return { name: name.textContent, nameTruncated: name.scrollWidth > name.clientWidth, kids, clashes,
              rowHeight: R(row).b - R(row).t };
   });
-  // The window frame is kdx-frame.js on the "strings" transport of kdx-bridge.js: what the native side hears, and what it can tell the page.
+  // The window frame is cdx-frame.js on the "strings" transport of cdx-bridge.js: what the native side hears, and what it can tell the page.
   step("frame_posts_and_events", () => {
     const tb = document.querySelector("#launcherWin .tb"), ptr = (el, type) => el.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, pointerId: 3 }));
     const posted = fn => { window.__posted.length = 0; fn(); return window.__posted.slice(); };
-    const out = { host: window.kdx && window.kdx.host };
+    const out = { host: window.cdx && window.cdx.host };
     // Two presses within 400 ms roll the window up: the double press goes first, so that the single press after it starts from a clean slate.
     out.dbl = posted(() => { ptr(tb, "pointerdown"); ptr(tb, "pointerup"); ptr(tb, "pointerdown"); ptr(tb, "pointerup"); });
     out.drag = posted(() => { ptr(tb, "pointerdown"); ptr(tb, "pointerup"); });

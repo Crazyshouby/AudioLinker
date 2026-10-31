@@ -1,4 +1,4 @@
-/* Styles of ui.html (the shared ones are common.css, the KDX-UI charter is kdx/). Inlined into the page at build time. */
+/* Styles of ui.html (the shared ones are common.css, the CDX-UI charter is cdx/). Inlined into the page at build time. */
 #app { height: 100%; }
 
 /* ---------- Header ---------- */
@@ -138,7 +138,7 @@
 
 .dev-right { flex: none; display: flex; align-items: center; gap: 8px; width: 120px; }
 .dev-right.wide { width: auto; } /* inputs rows: slider + value + mute + VU */
-/* Level meter: same bar as the transfer bars of KDX; amber near clipping. */
+/* Level meter: same bar as the transfer bars of CDX; amber near clipping. */
 .vu { flex: 1; height: 9px; background: var(--frame); border: 1px solid #0c0c0c; overflow: hidden; }
 .vu-fill { height: 100%; width: 0%; background: var(--bar); transition: width 0.08s linear; }
 .vu-fill.hot { background: var(--warn); }
@@ -301,7 +301,7 @@ html[data-panel="journal"] .grip-rz, html[data-panel="all"] #devicesCard .grip-r
 .counters { display: flex; justify-content: space-between; padding: 0 6px; margin-top: auto; color: var(--muted); font-family: var(--font-log); }
 .launcher #banner { padding: 5px 7px; flex-wrap: wrap; }
 
-/* ---------- Levels window (cf. KDX File Transfers) ---------- */
+/* ---------- Levels window (cf. CDX File Transfers) ---------- */
 .lvl { display: flex; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); align-items: flex-start; }
 .lvl-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .lvl-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -310,7 +310,7 @@ html[data-panel="journal"] .grip-rz, html[data-panel="all"] #devicesCard .grip-r
 .lvl.off .lvl-stat { color: var(--faint); }
 .lvl .vu { flex: none; }
 
-/* ---------- Journal window (cf. KDX News) ---------- */
+/* ---------- Journal window (cf. CDX News) ---------- */
 .journal { background: var(--ink); }
 .jr-h { background: var(--row-hover); color: var(--text); padding: 3px 7px; font-family: var(--font-log); line-height: 1.4; }
 .jr-b { background: var(--ink); color: var(--field-ink); padding: 5px 7px; font-family: var(--font-log); line-height: 1.4; white-space: pre-wrap; word-break: break-word; }

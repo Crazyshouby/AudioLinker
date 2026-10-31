@@ -5,8 +5,8 @@
 The output is committed: the build itself never runs Python.
   assets/icons.js   the pixel icons of tools/pixel_icons.py as SVG strings
 
-The fonts are not generated here any more: they come with the KDX-UI charter
-(assets/kdx/fonts.css, copied from the kdx-ui repository by tools/charte-sync.mjs).
+The fonts are not generated here any more: they come with the CDX-UI charter
+(assets/cdx/fonts.css, copied from the cdx-ui repository by tools/charte-sync.mjs).
 """
 import sys
 from pathlib import Path

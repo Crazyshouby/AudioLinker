@@ -50,15 +50,15 @@ jobs:
             if ($base -ne $v) { throw "Le tag $env:GITHUB_REF_NAME ne correspond pas à la version de CMakeLists.txt ($v)" }
           }
 
-      # The KDX-UI charter (kdx/) is copied from the kdx-ui repository (node tools/charte-sync.mjs --write audiolinker there): a copy edited by hand fails here.
+      # The CDX-UI charter (cdx/) is copied from the cdx-ui repository (node tools/charte-sync.mjs --write audiolinker there): a copy edited by hand fails here.
       - name: Charter copies are untouched
         shell: pwsh
-        run: node tools/kdx-verify.mjs kdx/kdx-sync.json
+        run: node tools/cdx-verify.mjs cdx/cdx-sync.json
 
-      # The pages follow the charter rules (CHARTE.md section 8); the copies in kdx/ are checked at the source.
+      # The pages follow the charter rules (CHARTE.md section 8); the copies in cdx/ are checked at the source.
       - name: Pages follow the charter
         shell: pwsh
-        run: node tools/charte-lint.mjs assets --manifest kdx/kdx-sync.json
+        run: node tools/charte-lint.mjs assets --manifest cdx/cdx-sync.json
 
       # Generated files are committed: regenerating them must change nothing.
       - name: Generated assets are up to date

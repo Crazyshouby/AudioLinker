@@ -1,6 +1,6 @@
 ## AudioLinker VERSION
 
-Diffuse le son de Windows sur plusieurs sorties à la fois, avec une interface en plusieurs fenêtres dans le style de KDX. Détail dans le [changelog](https://github.com/Crazyshouby/AudioLinker/blob/main/CHANGELOG.md).
+Diffuse le son de Windows sur plusieurs sorties à la fois, avec une interface en plusieurs fenêtres dans le style de CDX. Détail dans le [changelog](https://github.com/Crazyshouby/AudioLinker/blob/main/CHANGELOG.md).
 
 ### Installer
 

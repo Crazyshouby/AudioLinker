@@ -1,20 +1,20 @@
 /* Shared by ui.html and options.html -- inlined into each page at build time
    by cmake/InlineAssets.cmake, in place of the "@common.css@" marker comment.
-   The look is the KDX-UI charter (the kdx-ui repository): fonts, tokens, the
+   The look is the CDX-UI charter (the cdx-ui repository): fonts, tokens, the
    window frame and title bar, bevelled buttons, sliders, check boxes, toasts.
-   Its three files are copied into kdx/ by kdx-ui's tools/charte-sync.mjs
+   Its three files are copied into cdx/ by cdx-ui's tools/charte-sync.mjs
    and never edited here; what follows is only what AudioLinker's own pages need
    on top. Page layout stays in each page's own <style>.
 
    There is a single theme here -- no light variant, no system accent colour.
    The native side mirrors the frame and text colours (WindowBgForTheme in
    AppState.cpp, the switcher palette in Switcher.cpp): keep them in sync with
-   kdx/kdx-ui.css. */
+   cdx/cdx-ui.css. */
 
 /*@fonts.css@*/
-/*@kdx-ui.css@*/
+/*@cdx-ui.css@*/
 /*@themes.css@*/
-/*@kdx-frame.css@*/
+/*@cdx-frame.css@*/
 
 /* AudioLinker lays its windows out with its own paddings, not the charter's 5 px gap between children. */
 .cb { padding: 8px; gap: 0; }

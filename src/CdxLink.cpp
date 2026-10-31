@@ -1,9 +1,9 @@
-// The link between AudioLinker and the other KDX applications (the shell's taskbar, for now).
+// The link between AudioLinker and the other CDX applications (the shell's taskbar, for now).
 //
-// A named pipe, \\.\pipe\kdx.audiolinker, readable and writable by the current user only (remote clients are
+// A named pipe, \\.\pipe\cdx.audiolinker, readable and writable by the current user only (remote clients are
 // refused). One client at a time; lines of JSON in both directions, UTF-8, '\n' terminated:
 //
-// Messages are envelopes { "type", "from", "data" } (kdx-ui/docs/SUITE.md):
+// Messages are envelopes { "type", "from", "data" } (cdx-ui/docs/SUITE.md):
 //   client -> AudioLinker   audio.get                                    ask for the state
 //                           audio.toggle                                 start / stop the group
 //                           audio.volume  data {v: 0..100, commit: bool}
@@ -16,7 +16,7 @@
 // only reads, validates and posts; every command runs on the UI thread through HandleWebMessage, exactly as if
 // the page had sent it.
 #include "App.h"
-#include "kdx/kdx_bus.h"
+#include "cdx/cdx_bus.h"
 #include <sddl.h>
 #include <atomic>
 #include <memory>
@@ -26,7 +26,7 @@
 namespace al {
 namespace {
 
-constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\kdx.audiolinker";
+constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\cdx.audiolinker";
 constexpr size_t kMaxLine = 8192;
 
 enum LinkMsg : WPARAM { kConnected = 0, kCommand = 1, kGet = 2 };
@@ -86,11 +86,11 @@ std::wstring Translate(const std::string& line, bool& commit) {
 
 void PostCommand(const std::wstring& cmd, bool commit) {
     if (!g_mainWnd) return;
-    if (cmd == L"get") { PostMessageW(g_mainWnd, WM_KDX_LINK, kGet, 0); return; }
+    if (cmd == L"get") { PostMessageW(g_mainWnd, WM_CDX_LINK, kGet, 0); return; }
     auto* m = new std::wstring(cmd);
     // A volume released ("commit") is saved and shown in AudioLinker's own windows: a marker the UI thread strips.
     if (commit) m->append(L"\x01");
-    if (!PostMessageW(g_mainWnd, WM_KDX_LINK, kCommand, reinterpret_cast<LPARAM>(m))) delete m;
+    if (!PostMessageW(g_mainWnd, WM_CDX_LINK, kCommand, reinterpret_cast<LPARAM>(m))) delete m;
 }
 
 // Waits for `ov` to finish or for the application to close. True = finished with *bytes transferred.
@@ -150,7 +150,7 @@ void Serve(HANDLE pipe) {
 
 void Run() {
     std::wstring sddl = OwnerOnlySddl();
-    if (sddl.empty()) { LOG_WARN(L"KDX link: no security descriptor, link disabled"); return; }
+    if (sddl.empty()) { LOG_WARN(L"CDX link: no security descriptor, link disabled"); return; }
     SECURITY_ATTRIBUTES sa{ sizeof(sa), nullptr, FALSE };
     if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.c_str(), SDDL_REVISION_1, &sa.lpSecurityDescriptor, nullptr)) return;
     // FIRST_PIPE_INSTANCE: if another process already owns the name, say so instead of serving beside it. The
@@ -158,7 +158,7 @@ void Run() {
     HANDLE pipe = CreateNamedPipeW(kPipeName, PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
                                    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, 1, 16384, 16384, 0, &sa);
     LocalFree(sa.lpSecurityDescriptor);
-    if (pipe == INVALID_HANDLE_VALUE) { LOG_WARN(L"KDX link: pipe unavailable (already in use?), link disabled"); return; }
+    if (pipe == INVALID_HANDLE_VALUE) { LOG_WARN(L"CDX link: pipe unavailable (already in use?), link disabled"); return; }
     OVERLAPPED cn{};
     cn.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     for (;;) {
@@ -175,7 +175,7 @@ void Run() {
         }
         g_connected = true;
         { std::lock_guard<std::mutex> lk(g_mx); g_out.clear(); }
-        if (g_mainWnd) PostMessageW(g_mainWnd, WM_KDX_LINK, kConnected, 0); // the UI thread answers with the state
+        if (g_mainWnd) PostMessageW(g_mainWnd, WM_CDX_LINK, kConnected, 0); // the UI thread answers with the state
         Serve(pipe);
         g_connected = false;
         DisconnectNamedPipe(pipe);
@@ -187,14 +187,14 @@ void Run() {
 
 } // namespace
 
-void KdxLinkStart() {
+void CdxLinkStart() {
     if (g_thread.joinable()) return;
     g_stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     g_wake = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     g_thread = std::thread(Run);
 }
 
-void KdxLinkStop() {
+void CdxLinkStop() {
     if (!g_thread.joinable()) return;
     SetEvent(g_stop);
     g_thread.join();
@@ -204,7 +204,7 @@ void KdxLinkStop() {
 }
 
 // ---- Notifications for the shell's quick centre ----
-void KdxNotifyShell(const char* level, const std::wstring& text) {
+void CdxNotifyShell(const char* level, const std::wstring& text) {
     // The same line twice within 10 s is one notification (an error repeated by a retry loop must not flood the centre).
     static std::mutex mx;
     static std::wstring lastText;
@@ -221,26 +221,26 @@ void KdxNotifyShell(const char* level, const std::wstring& text) {
     d["text"] = ToUtf8(text.size() > 400 ? text.substr(0, 400) : text);
     d["level"] = level;
     std::string data = d.dump();
-    std::thread([data] { kdx::bus::Send("shell", "notify", data, "audiolinker"); }).detach();
+    std::thread([data] { cdx::bus::Send("shell", "notify", data, "audiolinker"); }).detach();
 }
 
-// ---- The accent of the suite (%APPDATA%\KDX\suite.json) ----
+// ---- The accent of the suite (%APPDATA%\CDX\suite.json) ----
 // Read at startup, then polled every kSuiteIntervalMs on the UI thread; a change is pushed to every page as { type: "theme", value }.
 // New pages learn it from the state message (suiteAccent).
-static std::unique_ptr<kdx::suite::Watcher> g_suiteWatcher;
+static std::unique_ptr<cdx::suite::Watcher> g_suiteWatcher;
 static std::string g_suiteAccent = "rouge";
 
-void KdxSuiteStart(HWND hwnd) {
-    g_suiteAccent = kdx::suite::ReadAccent("rouge");
-    g_suiteWatcher = std::make_unique<kdx::suite::Watcher>(g_suiteAccent);
+void CdxSuiteStart(HWND hwnd) {
+    g_suiteAccent = cdx::suite::ReadAccent("rouge");
+    g_suiteWatcher = std::make_unique<cdx::suite::Watcher>(g_suiteAccent);
     SetTimer(hwnd, IDT_SUITE, kSuiteIntervalMs, nullptr);
 }
 
-void KdxSuiteTick() {
+void CdxSuiteTick() {
     std::string a;
     if (g_suiteWatcher && g_suiteWatcher->Changed(a)) {
         g_suiteAccent = a;
-        LOG_INFO(L"KDX suite accent: " + FromUtf8(a));
+        LOG_INFO(L"CDX suite accent: " + FromUtf8(a));
         json j;
         j["type"] = "theme";
         j["value"] = a;
@@ -248,10 +248,10 @@ void KdxSuiteTick() {
     }
 }
 
-const std::string& KdxSuiteAccent() { return g_suiteAccent; }
+const std::string& CdxSuiteAccent() { return g_suiteAccent; }
 
 // UI thread. `force`: the client has just connected, send even if nothing changed.
-void KdxLinkPublish(const json& st, bool force) {
+void CdxLinkPublish(const json& st, bool force) {
     if (!g_connected) { g_lastSent.clear(); return; }
     json d;
     d["version"] = st.value("version", "");
@@ -273,7 +273,7 @@ void KdxLinkPublish(const json& st, bool force) {
 }
 
 // UI thread: a message of the link.
-void KdxLinkHandle(HWND hwnd, WPARAM what, LPARAM param) {
+void CdxLinkHandle(HWND hwnd, WPARAM what, LPARAM param) {
     if (what == kCommand) {
         std::unique_ptr<std::wstring> m(reinterpret_cast<std::wstring*>(param));
         bool commit = !m->empty() && m->back() == L'\x01';
@@ -288,7 +288,7 @@ void KdxLinkHandle(HWND hwnd, WPARAM what, LPARAM param) {
         if (commit) { HandleWebMessage(hwnd, L"mastervolumecommit"); SendState(); }
         return;
     }
-    KdxLinkPublish(BuildState(), true);
+    CdxLinkPublish(BuildState(), true);
 }
 
 } // namespace al

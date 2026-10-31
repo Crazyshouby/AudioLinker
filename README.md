@@ -24,7 +24,7 @@ Tant que l'installateur n'est pas signé numériquement, SmartScreen peut affich
 - **Setups** : configurations nommées, applicables via l'UI, le menu tray, un switcher global (`Ctrl+Alt+S`) ou `Ctrl+Maj+1-9` (désactivable). Basculer entre deux setups bâtis sur les mêmes enceintes se fait **sans coupure**.
 - **Automatisation** : par enceinte, « quand elle se connecte, jouer tel setup » et « quand elle se déconnecte, arrêter le groupe ».
 - **Entrées** : micro par défaut Windows, niveau et mute mémorisés par setup, VU-mètres.
-- **Intégration Windows** : icône de zone de notification (verte quand le groupe joue, notifications quand la fenêtre est cachée), muet global, raccourcis globaux personnalisables, style KDX sombre, démarrage avec Windows, DPI par moniteur, reprise après veille, surveillance de la sortie par défaut et réparation automatique après un arrêt brutal.
+- **Intégration Windows** : icône de zone de notification (verte quand le groupe joue, notifications quand la fenêtre est cachée), muet global, raccourcis globaux personnalisables, style CDX sombre, démarrage avec Windows, DPI par moniteur, reprise après veille, surveillance de la sortie par défaut et réparation automatique après un arrêt brutal.
 
 ## Prérequis
 
@@ -74,9 +74,9 @@ ctest --test-dir build
 
 L'interface reprend le thème et l'organisation de KDX (Haxial) : un menu principal étroit (colonne de boutons) et une vraie fenêtre par fonction (Sorties avec la fiche enceinte, Setups, Niveaux, Journal, Options), déplaçables, redimensionnables et enroulables par la barre de titre. Panneaux gris anthracite, boutons biseautés, consoles noires à texte vert, fenêtre active cerclée de rouge, pictogrammes pixel-art. Réduire le menu principal (« − ») range tout dans la zone de notification ; « Quitter » arrête l'application. Il n'y a qu'un thème (sombre) : le réglage clair/sombre et la couleur d'accentuation Windows ont disparu.
 
-- `assets/common.css` : jetons de couleur et widgets partagés par les deux pages. Les valeurs viennent de l'apparence par défaut de KDX, relevées pixel par pixel sur les captures sans perte de sa documentation (fenêtre active rouge, barres de titre en dégradé, relief des boutons, rangées bleu marine et pêche). Aucun fichier de KDX n'est repris : tout est redessiné.
-- `kdx/` : la charte graphique KDX-UI (`kdx-ui.css`, `themes.css`, `fonts.css`) et le client du bus de la suite (`kdx_bus.h`), copiée **telle quelle** depuis le dépôt `kdx-ui` par `node tools/charte-sync.mjs --write audiolinker` (ne jamais la modifier ici ; `--check` vérifie qu'elle est à jour).
-- `assets/icons.js` : ressource **générée** (pictogrammes propres à AudioLinker). Elle est versionnée ; le build n'exécute pas Python. Pour la régénérer : `python tools/gen_assets.py`. Les pictogrammes sont dessinés dans `tools/pixel_icons.py`, sur le moteur commun `tools/pixel_engine.py` (copie de kdx-ui, ne pas modifier ici).
+- `assets/common.css` : jetons de couleur et widgets partagés par les deux pages. Les valeurs viennent de l'apparence par défaut de CDX, relevées pixel par pixel sur les captures sans perte de sa documentation (fenêtre active rouge, barres de titre en dégradé, relief des boutons, rangées bleu marine et pêche). Aucun fichier de CDX n'est repris : tout est redessiné.
+- `cdx/` : la charte graphique CDX-UI (`cdx-ui.css`, `themes.css`, `fonts.css`) et le client du bus de la suite (`cdx_bus.h`), copiée **telle quelle** depuis le dépôt `cdx-ui` par `node tools/charte-sync.mjs --write audiolinker` (ne jamais la modifier ici ; `--check` vérifie qu'elle est à jour).
+- `assets/icons.js` : ressource **générée** (pictogrammes propres à AudioLinker). Elle est versionnée ; le build n'exécute pas Python. Pour la régénérer : `python tools/gen_assets.py`. Les pictogrammes sont dessinés dans `tools/pixel_icons.py`, sur le moteur commun `tools/pixel_engine.py` (copie de cdx-ui, ne pas modifier ici).
 
 ## Signature de code
 

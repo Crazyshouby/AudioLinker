@@ -7,7 +7,7 @@ const $ = s => document.querySelector(s);
 const bridge = window.chrome && window.chrome.webview;
 const post = m => { if (bridge) bridge.postMessage(m); };
 
-// The look is the KDX-UI charter (see common.css): no theme override, no Windows accent.
+// The look is the CDX-UI charter (see common.css): no theme override, no Windows accent.
 
 // Which window this page is (set by the native side before the page runs):
 // launcher, outputs, setups, levels, journal, options -- or "all" in a plain
@@ -67,18 +67,18 @@ function toast(msg, kind, action) {
 }
 
 // ---------- Window chrome (title bar buttons, drag, resize grip) ----------
-// The frame is kdx-frame.js, shared by the whole KDX suite, talking to the native side through kdx-bridge.js (its "strings" transport, selected
-// by data-kdx-host="strings" on <html>: dragstart / dragmove / dragend, resizewin, shade, closepanel). The native side owns the window: the page
+// The frame is cdx-frame.js, shared by the whole CDX suite, talking to the native side through cdx-bridge.js (its "strings" transport, selected
+// by data-cdx-host="strings" on <html>: dragstart / dragmove / dragend, resizewin, shade, closepanel). The native side owns the window: the page
 // only asks. data-act="close" closes this window (the launcher: hides everything to the tray), "shade" rolls it up to its title bar.
-/*@kdx-bridge.js@*/
-/*@kdx-frame.js@*/
-KdxFrame.init();
+/*@cdx-bridge.js@*/
+/*@cdx-frame.js@*/
+CdxFrame.init();
 
-// The accent of the KDX suite (%APPDATA%\KDX\suite.json): the page takes the theme of themes.css of that name.
-const applySuiteAccent = a => { if (a) KdxFrame.applyTheme(a); };
+// The accent of the CDX suite (%APPDATA%\CDX\suite.json): the page takes the theme of themes.css of that name.
+const applySuiteAccent = a => { if (a) CdxFrame.applyTheme(a); };
 
 // Messages every window understands. "active" (Windows has activated the window: the red frame), "shade" (rolled up) and "theme" (the suite's
-// accent changed) are handled by kdx-frame.js, which listens to the same messages: true = nothing more for the page to do with them.
+// accent changed) are handled by cdx-frame.js, which listens to the same messages: true = nothing more for the page to do with them.
 function chromeMessage(m) {
   if (m.type === "active" || m.type === "shade" || m.type === "theme") return true;
   if (m.type === "state" && m.suiteAccent) applySuiteAccent(m.suiteAccent); // and the page still handles the state itself

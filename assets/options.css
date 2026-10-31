@@ -1,5 +1,5 @@
-/* Styles of options.html (the shared ones are common.css, the KDX-UI charter is kdx/). Inlined into the page at build time. */
-/* The page is one KDX window (frame and title bar from common.css); each
+/* Styles of options.html (the shared ones are common.css, the CDX-UI charter is cdx/). Inlined into the page at build time. */
+/* The page is one CDX window (frame and title bar from common.css); each
    section heading is a small title bar of its own. */
 #app {
   display: grid; gap: 10px; padding: 12px 14px 14px; align-content: start; overflow-y: auto; flex: 1;

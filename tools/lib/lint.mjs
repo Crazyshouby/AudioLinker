@@ -16,10 +16,10 @@ export const RULES = {
 const norm = h => { h = h.toLowerCase(); return h.length === 4 ? '#' + [...h.slice(1)].map(c => c + c).join('') : h; };
 const HEX = /(?<![&\w%])#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b(?![\w-])/g;
 
-// Les couleurs permises : celles de tokens.json et celles que kdx-ui.css / kdx-frame.css emploient elles-mêmes.
+// Les couleurs permises : celles de tokens.json et celles que cdx-ui.css / cdx-frame.css emploient elles-mêmes.
 export function loadPalette(root) {
   const set = new Set();
-  for (const f of ['tokens.json', 'kdx-ui.css', 'kdx-frame.css', 'themes.css']) {
+  for (const f of ['tokens.json', 'cdx-ui.css', 'cdx-frame.css', 'themes.css']) {
     const p = path.join(root, f); if (!fs.existsSync(p)) continue;
     for (const m of fs.readFileSync(p, 'utf8').matchAll(HEX)) set.add(norm('#' + m[1]));
   }

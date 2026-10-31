@@ -1,6 +1,6 @@
-// node tools/charte-lint.mjs <fichier|dossier> ... [--allow charte-lint.allow] [--manifest kdx-sync.json] [--json] [--examples N] [--include-generated]
+// node tools/charte-lint.mjs <fichier|dossier> ... [--allow charte-lint.allow] [--manifest cdx-sync.json] [--json] [--examples N] [--include-generated]
 // Contrôle les règles de CHARTE.md §8. Code de sortie 1 s'il reste des écarts non tolérés (les exceptions justifiées vont dans le fichier --allow).
-// Dans une application (cette copie vient de kdx-ui par charte-sync) : --manifest désigne le kdx-sync.json de ses copies de la charte ; ces copies ne sont
+// Dans une application (cette copie vient de cdx-ui par charte-sync) : --manifest désigne le cdx-sync.json de ses copies de la charte ; ces copies ne sont
 // pas contrôlées (elles le sont à la source) et la palette permise est lue dans leur dossier. Sans --manifest : la charte elle-même, à la racine du dépôt.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,7 +14,7 @@ const flag = n => { const i = args.indexOf(n); if (i < 0) return false; args.spl
 const allowFile = opt('--allow', fs.existsSync(path.join(repo, 'charte-lint.allow')) ? path.join(repo, 'charte-lint.allow') : '');
 const manifestFile = opt('--manifest', '');
 const examples = +opt('--examples', 3), json = flag('--json'), gen = flag('--include-generated');
-if (!args.length) { console.error('usage : node tools/charte-lint.mjs <fichier|dossier> ... [--allow fichier] [--manifest kdx-sync.json] [--json] [--examples N]'); process.exit(2); }
+if (!args.length) { console.error('usage : node tools/charte-lint.mjs <fichier|dossier> ... [--allow fichier] [--manifest cdx-sync.json] [--json] [--examples N]'); process.exit(2); }
 
 const allow = allowFile ? parseAllow(fs.readFileSync(allowFile, 'utf8')) : [];
 let paletteDir = repo, exclude = new Set();

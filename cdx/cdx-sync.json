@@ -1,0 +1,53 @@
+{
+  "cdxUi": "1.0.0",
+  "files": {
+    "cdx/cdx-ui.css": {
+      "from": "cdx-ui.css",
+      "sha256": "1a5650dc9e9243de9e28820e15d13b1f4b95c8f9024fe16b17e673b513d1a8f7"
+    },
+    "cdx/themes.css": {
+      "from": "themes.css",
+      "sha256": "a0d689d0cc48b636d7ee9188078294fa15df5b7e71beca69038e3d2e44947e07"
+    },
+    "cdx/fonts.css": {
+      "from": "fonts.css",
+      "sha256": "42e6d1d1f8f7268a15631b5d982fc41a9080665140bfc3d844f88480ecdca0c7"
+    },
+    "cdx/cdx_bus.h": {
+      "from": "cdx_bus.h",
+      "sha256": "d68fbffc25fc124b04527d21276abd143902f3876a8335e09026c4f27ce1c1a7"
+    },
+    "tools/cdx-verify.mjs": {
+      "from": "cdx-verify.mjs",
+      "sha256": "347fc3c292ee0b9ca2b3ae82b78e6c9abe62fdea38b529ebeb088b7623240982"
+    },
+    "tools/pixel_engine.py": {
+      "from": "pixel_engine.py",
+      "sha256": "037dad564ef402d76aac774cf33f7e31a5e005d563c0d968e758bc959c705eba"
+    },
+    "cdx/cdx-bridge.js": {
+      "from": "cdx-bridge.js",
+      "sha256": "f5f055ec0daec79fb04b18fd5dfe84f66aa47bdee8a8bf3468214878f839ef64"
+    },
+    "cdx/cdx-frame.js": {
+      "from": "cdx-frame.js",
+      "sha256": "e4f7d34b1d4cc24b609e3fb47956e3da6977e7ccc66c8381bbe799ffa2ba8986"
+    },
+    "cdx/cdx-frame.css": {
+      "from": "cdx-frame.css",
+      "sha256": "edba0157d03d56df2028b562b56cc47fc59a2ee283cc88c64ae72fc2a5b62321"
+    },
+    "cdx/tokens.json": {
+      "from": "tokens.json",
+      "sha256": "5890b92eeed1adb47c9fca378f52fb43d4c1a1cf83990024ffeb41258e2b6429"
+    },
+    "tools/charte-lint.mjs": {
+      "from": "charte-lint.mjs",
+      "sha256": "103784201d7461c19761ac2c4bae18f213150e6b08d3459c5c4b5bf10cd01636"
+    },
+    "tools/lib/lint.mjs": {
+      "from": "lint.mjs",
+      "sha256": "9d4adb8b900bf9b576d83f252c6a54479d79fe95f1ee68e93459befeb1226ab7"
+    }
+  }
+}

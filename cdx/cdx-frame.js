@@ -1,9 +1,9 @@
-/* kdx-frame.js -- le cadre de fenêtre KDX et ses composants, écrits une seule fois (kdx-bridge.js doit être chargé avant ; kdx-frame.css avec kdx-ui.css).
+/* cdx-frame.js -- le cadre de fenêtre CDX et ses composants, écrits une seule fois (cdx-bridge.js doit être chargé avant ; cdx-frame.css avec cdx-ui.css).
    Le HTML attendu est celui de la charte :
      <div class="win active"><div class="tb"><button class="tb-btn tb-l" data-act="close"></button> ... <span class="tb-title">Titre</span> ...</div><div class="cb">...</div><i class="grip-rz"></i></div>
-   data-act d'un .tb-btn : close | min | max (ou zoom) | shade | menu (émet l'événement « kdx:menu » sur le bouton) ; data-glyph : x | minus | plus (déduit de data-act par défaut).
+   data-act d'un .tb-btn : close | min | max (ou zoom) | shade | menu (émet l'événement « cdx:menu » sur le bouton) ; data-glyph : x | minus | plus (déduit de data-act par défaut).
    data-dblclick d'un .tb : "shade" (défaut, comme KIRC et AudioLinker) ou "max" (Explorateur, Navigateur).
-   Usage :  KdxFrame.init();  KdxFrame.edges();  KdxFrame.title("Documents");  await KdxFrame.dialog({ title, text, icon, yes, no });  KdxFrame.menu(items, x, y, title) */
+   Usage :  CdxFrame.init();  CdxFrame.edges();  CdxFrame.title("Documents");  await CdxFrame.dialog({ title, text, icon, yes, no });  CdxFrame.menu(items, x, y, title) */
 (() => {
   "use strict";
   const GLYPH = {
@@ -18,29 +18,29 @@
   // enrouler (ou agrandir). Le transport « webview2 » n'a besoin que de « start » (boucle de déplacement native de Windows).
   function titleBar(tb) {
     let lastDown = -Infinity, dragging = false, queued = false;   // -Infinity : un premier appui juste après le chargement ne doit pas compter comme double (défaut de KIRC et d'AudioLinker)
-    const dbl = () => (tb.dataset.dblclick === "max" ? kdx.win.max() : kdx.win.shade());
+    const dbl = () => (tb.dataset.dblclick === "max" ? cdx.win.max() : cdx.win.shade());
     tb.addEventListener("pointerdown", ev => {
       if (ev.button !== 0 || ev.target.closest(".tb-btn")) return;
       const now = performance.now();
       if (now - lastDown < 400) { lastDown = -Infinity; dbl(); return; }
       lastDown = now; dragging = true;
       try { tb.setPointerCapture(ev.pointerId); } catch { /* pas de capture : le déplacement natif s'en passe */ }
-      kdx.win.drag("start");
+      cdx.win.drag("start");
     });
     tb.addEventListener("pointermove", () => {
       if (!dragging || queued) return;
       queued = true;
-      requestAnimationFrame(() => { queued = false; if (dragging) kdx.win.drag("move"); });
+      requestAnimationFrame(() => { queued = false; if (dragging) cdx.win.drag("move"); });
     });
-    const end = () => { if (dragging) { dragging = false; kdx.win.drag("end"); } };
+    const end = () => { if (dragging) { dragging = false; cdx.win.drag("end"); } };
     tb.addEventListener("pointerup", end);
     tb.addEventListener("pointercancel", end);
     for (const b of tb.querySelectorAll(".tb-btn")) {
       const act = b.dataset.act; if (!act) continue;
       const g = b.dataset.glyph || DEFAULT_GLYPH[act]; if (g && !b.firstChild) b.innerHTML = GLYPH[g] || "";
       b.addEventListener("click", ev => {
-        if (act === "menu") b.dispatchEvent(new CustomEvent("kdx:menu", { bubbles: true, detail: { x: ev.clientX, y: ev.clientY } }));
-        else if (act === "zoom") kdx.win.max(); else kdx.win[act] && kdx.win[act]();
+        if (act === "menu") b.dispatchEvent(new CustomEvent("cdx:menu", { bubbles: true, detail: { x: ev.clientX, y: ev.clientY } }));
+        else if (act === "zoom") cdx.win.max(); else cdx.win[act] && cdx.win[act]();
       });
     }
   }
@@ -51,30 +51,30 @@
     el.addEventListener("pointerdown", ev => {
       if (ev.button !== 0) return;
       sizing = true; try { el.setPointerCapture(ev.pointerId); } catch { /* idem */ }
-      kdx.win.resize("start", edge);
+      cdx.win.resize("start", edge);
     });
     el.addEventListener("pointermove", () => {
       if (!sizing || queued) return;
       queued = true;
-      requestAnimationFrame(() => { queued = false; if (sizing) kdx.win.resize("move", edge); });
+      requestAnimationFrame(() => { queued = false; if (sizing) cdx.win.resize("move", edge); });
     });
-    const end = () => { if (sizing) { sizing = false; kdx.win.resize("end", edge); } };
+    const end = () => { if (sizing) { sizing = false; cdx.win.resize("end", edge); } };
     el.addEventListener("pointerup", end);
     el.addEventListener("pointercancel", end);
   }
 
-  const applyTheme = name => { if (!name || name === "rouge" || name === "kdx") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = name; };
+  const applyTheme = name => { if (!name || name === "rouge" || name === "cdx") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = name; };
 
-  const KdxFrame = {
+  const CdxFrame = {
     // Branche tout le cadre de la page (barres de titre, poignées, événements de l'hôte) et annonce que la page est prête.
     init(opts = {}) {
       document.querySelectorAll(".tb").forEach(titleBar);
       document.querySelectorAll(".grip-rz").forEach(g => resizer(g, 17));
       document.querySelectorAll(".rz[data-e]").forEach(g => resizer(g, +g.dataset.e));
-      kdx.on("active", v => document.body.classList.toggle("active", !!v));
-      kdx.on("shade", v => document.body.classList.toggle("shaded", !!v));
-      kdx.on("theme", applyTheme);
-      if (opts.ready !== false) kdx.win.ready();
+      cdx.on("active", v => document.body.classList.toggle("active", !!v));
+      cdx.on("shade", v => document.body.classList.toggle("shaded", !!v));
+      cdx.on("theme", applyTheme);
+      if (opts.ready !== false) cdx.win.ready();
       return this;
     },
     // Ajoute les huit poignées de bord si la page n'en a pas (fenêtres sans cadre système redimensionnables par leur bord).
@@ -84,7 +84,7 @@
       for (const [k, e] of Object.entries(codes)) { const i = document.createElement("i"); i.className = "rz " + k; i.dataset.e = e; resizer(i, e); document.body.appendChild(i); }
       return this;
     },
-    title(text) { document.querySelectorAll(".tb-title").forEach(t => { t.textContent = text; }); kdx.win.title(text); },
+    title(text) { document.querySelectorAll(".tb-title").forEach(t => { t.textContent = text; }); cdx.win.title(text); },
     applyTheme,
 
     // Boîte de dialogue modale. Résout true (bouton par défaut, un seul par dialogue) ou false (Non, Échap).
@@ -106,7 +106,7 @@
     //  - sub : un sous-menu (liste d'éléments de la même forme, ou fonction qui la rend : elle est appelée à l'ouverture, pour une liste longue ou lente à construire). Il s'ouvre au survol (120 ms)
     //    ou au clic, à droite de l'élément (à gauche s'il manque de la place), et l'`action` d'un tel élément est ignorée. Cliquer une action d'un sous-menu ferme tous les niveaux.
     menu(items, x, y, title = "") {
-      document.querySelectorAll(".menu[data-kdx]").forEach(m => m.remove());
+      document.querySelectorAll(".menu[data-cdx]").forEach(m => m.remove());
       const levels = [];   // les menus ouverts, du premier au dernier
       const closeFrom = n => { while (levels.length > n) levels.pop().el.remove(); };
       const closeAll = () => { closeFrom(0); document.removeEventListener("mousedown", away, true); document.removeEventListener("keydown", esc2, true); window.removeEventListener("blur", closeAll); };
@@ -116,7 +116,7 @@
       // Construit un niveau ; `anchor` (rectangle de l'élément parent) place un sous-menu à côté de lui, sinon (x, y) est la position du pointeur.
       function build(list, level, px, py, ttl, anchor) {
         closeFrom(level);
-        const m = document.createElement("div"); m.className = "menu"; m.dataset.kdx = "1";
+        const m = document.createElement("div"); m.className = "menu"; m.dataset.cdx = "1";
         const icons = !!window.pix && list.some(it => it && it[2] && it[2].icon);   // l'espace d'icône n'existe que si un élément en a une
         const keys = list.some(it => it && it[2] && it[2].key);
         const checks = list.some(it => it && it[2] && it[2].check !== undefined);
@@ -157,5 +157,5 @@
       return closeAll;
     },
   };
-  window.KdxFrame = KdxFrame;
+  window.CdxFrame = CdxFrame;
 })();

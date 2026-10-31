@@ -6,7 +6,7 @@ writes them into assets/icons.js.
 """
 import math
 
-from pixel_engine import C, PAL  # noqa: F401  (copie de kdx-ui/gen/pixel_engine.py)
+from pixel_engine import C, PAL  # noqa: F401  (copie de cdx-ui/gen/pixel_engine.py)
 
 
 def speaker():

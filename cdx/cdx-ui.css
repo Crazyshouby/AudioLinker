@@ -1,11 +1,11 @@
-/* KDX-UI -- la charte graphique KDX (Haxial) en une feuille de style, prête à reprendre dans un autre projet.
+/* CDX-UI -- la charte graphique KDX (Haxial) en une feuille de style, prête à reprendre dans un autre projet.
 
    Extraite de KIRC (ui/theme.css + ui/kirc.css) avec les valeurs FINALES : plus aucune couche qui en recouvre une autre.
    Pas de mise en page d'application ici, seulement : jetons (couleurs, polices), fenêtre et barre de titre, boutons,
    champs, cases, listes, onglets, barres de défilement, groupes, menus, infobulles, console.
    Voir CHARTE.md pour les règles, exemple.html pour tout voir assemblé.
 
-   Ordre de chargement :  fonts.css, kdx-ui.css, puis (facultatif) themes.css.
+   Ordre de chargement :  fonts.css, cdx-ui.css, puis (facultatif) themes.css.
    Pour changer de couleur d'accent : <html data-theme="bleu"> (bleu, vert, violet, ambre, sarcelle, charbon). */
 
 /* ================================================================ Jetons */
@@ -25,9 +25,9 @@
   --text: #ffffff;
   --muted: #ffffff;
   --faint: #888888;
-  --field-ink: #00ff00;      /* texte des champs et des consoles (vert KDX) */
+  --field-ink: #00ff00;      /* texte des champs et des consoles (vert CDX) */
 
-  /* Rampe d'accent (défaut : rouge KDX, mesuré sur KDX 1.6). themes.css la remplace par thème. */
+  /* Rampe d'accent (défaut : rouge CDX, mesuré sur KDX 1.6). themes.css la remplace par thème. */
   --a-edge: #cc0000; --a-mid: #880000; --a-dark: #440000; --a-hover: #660000;
   --a-title-from: #320000; --a-title-to: #c30000;
   --bar-top: #e83c3c; --bar-mid: #c01010; --bar-bot: #8a0202; --a-spark: #ff8a74;
@@ -72,7 +72,7 @@
   --tb-edge: #555555; --tb-low: #222222; --tb-grad: linear-gradient(#0c0c0c, #222222 47%, #8f8f8f);
   --tbb-fill: #444444; --tbb-hi: #8a8a8a; --tbb-lo: #222222;
 
-  /* Coins : KDX n'a aucun arrondi. Les boutons de dialogue perdent 3 pixels par coin (chanfrein). */
+  /* Coins : CDX n'a aucun arrondi. Les boutons de dialogue perdent 3 pixels par coin (chanfrein). */
   --chamfer2: polygon(2px 0, calc(100% - 2px) 0, calc(100% - 2px) 1px, calc(100% - 1px) 1px, calc(100% - 1px) 2px, 100% 2px, 100% calc(100% - 2px), calc(100% - 1px) calc(100% - 2px), calc(100% - 1px) calc(100% - 1px), calc(100% - 2px) calc(100% - 1px), calc(100% - 2px) 100%, 2px 100%, 2px calc(100% - 1px), 1px calc(100% - 1px), 1px calc(100% - 2px), 0 calc(100% - 2px), 0 2px, 1px 2px, 1px 1px, 2px 1px);
   --chamfer1: polygon(1px 0, calc(100% - 1px) 0, calc(100% - 1px) 1px, 100% 1px, 100% calc(100% - 1px), calc(100% - 1px) calc(100% - 1px), calc(100% - 1px) 100%, 1px 100%, 1px calc(100% - 1px), 0 calc(100% - 1px), 0 1px, 1px 1px);
 
@@ -261,23 +261,23 @@ input[type="range"]:focus-visible { outline: var(--focus-ring); outline-offset: 
 .row-item .count.hot { background: var(--a-edge); }
 .empty { color: var(--faint); text-align: center; padding: 22px 12px; font-weight: 600; }
 /* En-tête de colonne : un bouton carré qui trie ; la colonne triée porte un petit triangle. */
-.lhead { display: grid; grid-template-columns: var(--kdx-cols, none); flex: none; padding-right: 15px; margin-bottom: 3px; }   /* --kdx-cols : kdx-columns.js */
+.lhead { display: grid; grid-template-columns: var(--cdx-cols, none); flex: none; padding-right: 15px; margin-bottom: 3px; }   /* --cdx-cols : cdx-columns.js */
 .lh {
   white-space: nowrap; overflow: hidden; font: inherit; font-weight: 700; color: var(--text); text-align: left; padding: 0 8px; height: 22px; cursor: pointer;
   background: var(--btn); border: 1px solid #000; border-radius: 0; box-shadow: var(--bevel);
 }
 .lh:hover { background: #3b3b3b; }
 .lh { position: relative; }
-/* poignées de colonne (kdx-columns.js) : une bande sur le bord droit de chaque en-tête, qui s'éclaire au survol et pendant qu'on la tire */
-.kdx-colrz { position: absolute; top: 0; right: 0; bottom: 0; width: 7px; cursor: col-resize; z-index: 2; touch-action: none; }
-.kdx-colrz:hover, .kdx-colrz.drag { box-shadow: inset -2px 0 0 var(--a-edge); }
-body.kdx-colsizing, body.kdx-colsizing * { cursor: col-resize !important; user-select: none; }
-/* barres entre volets (kdx-split.js) : un élément de largeur nulle posé dans l'espace du conteneur flex ; sa bande déborde de part et d'autre */
-.kdx-split { flex: none; width: 0; position: relative; z-index: 3; align-self: stretch; }
-.kdx-split[hidden] { display: none; }
-.kdx-split > i { position: absolute; top: 0; bottom: 0; cursor: col-resize; touch-action: none; }
-.kdx-split > i::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; margin-left: -1px; background: var(--a-edge); opacity: 0; }
-.kdx-split > i:hover::after, .kdx-split.drag > i::after { opacity: 1; }
+/* poignées de colonne (cdx-columns.js) : une bande sur le bord droit de chaque en-tête, qui s'éclaire au survol et pendant qu'on la tire */
+.cdx-colrz { position: absolute; top: 0; right: 0; bottom: 0; width: 7px; cursor: col-resize; z-index: 2; touch-action: none; }
+.cdx-colrz:hover, .cdx-colrz.drag { box-shadow: inset -2px 0 0 var(--a-edge); }
+body.cdx-colsizing, body.cdx-colsizing * { cursor: col-resize !important; user-select: none; }
+/* barres entre volets (cdx-split.js) : un élément de largeur nulle posé dans l'espace du conteneur flex ; sa bande déborde de part et d'autre */
+.cdx-split { flex: none; width: 0; position: relative; z-index: 3; align-self: stretch; }
+.cdx-split[hidden] { display: none; }
+.cdx-split > i { position: absolute; top: 0; bottom: 0; cursor: col-resize; touch-action: none; }
+.cdx-split > i::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; margin-left: -1px; background: var(--a-edge); opacity: 0; }
+.cdx-split > i:hover::after, .cdx-split.drag > i::after { opacity: 1; }
 .lh.on::after { content: ""; display: inline-block; margin-left: 7px; vertical-align: middle; border: 4px solid transparent; border-top: 5px solid #fff; border-bottom: 0; }
 
 /* ================================================================ Onglets */

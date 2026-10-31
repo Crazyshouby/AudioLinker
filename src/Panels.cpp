@@ -1,6 +1,6 @@
 // The floating windows of the KDX-style UI.
 //
-// Like KDX, AudioLinker is not one big window but a small launcher (the main
+// Like CDX, AudioLinker is not one big window but a small launcher (the main
 // window, a column of buttons) plus one top-level window per function:
 // speaker list, setups, level meters, journal, options. Every window is
 // borderless (WS_POPUP) and draws its own title bar in HTML: a close box on

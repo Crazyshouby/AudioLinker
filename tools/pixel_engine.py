@@ -1,7 +1,7 @@
-"""Moteur des pictogrammes pixel (16x16, contour noir, aplats) de la suite KDX : palette et toile.
+"""Moteur des pictogrammes pixel (16x16, contour noir, aplats) de la suite CDX : palette et toile.
 
 Chaque pictogramme se dessine avec quelques primitives, se contourne seul et s'exporte en SVG compact (un <path> par couleur).
-Source unique : kdx-ui/gen/pixel_engine.py ; KIRC et AudioLinker en ont une copie (charte-sync) et y ajoutent leurs propres
+Source unique : cdx-ui/gen/pixel_engine.py ; KIRC et AudioLinker en ont une copie (charte-sync) et y ajoutent leurs propres
 pictogrammes (pixel_icons.py). svg(accent={}) garde le rouge fixe (AudioLinker) ; par défaut le rouge suit l'accent du thème.
 """
 import math  # noqa: F401  (utilisé par les modules d'icônes qui font « from pixel_engine import * »)
@@ -13,7 +13,7 @@ PAL = {'K': '#000000', 'Y': '#fcc21c', 'y': '#c4840c', 'W': '#fff6dc', 'w': '#f4
 
 
 # Le rouge des icônes (R, r) suit l'accent du thème : variables CSS --ic-accent / --ic-accent-dark (tokens.json), avec l'ancienne valeur en repli
-# pour les pages qui ne chargent pas kdx-ui.css. Les autres couleurs (jaune, bleu, vert...) restent fixes : ce sont des couleurs d'objet.
+# pour les pages qui ne chargent pas cdx-ui.css. Les autres couleurs (jaune, bleu, vert...) restent fixes : ce sont des couleurs d'objet.
 ACCENT_FILL = {'R': 'var(--ic-accent,#e02020)', 'r': 'var(--ic-accent-dark,#8a0202)'}
 
 

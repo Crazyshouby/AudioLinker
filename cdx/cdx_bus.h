@@ -1,10 +1,10 @@
-// kdx_bus.h -- le client C++ des réglages communs et du bus de la suite KDX (voir docs/SUITE.md). En-tête seul, sans bibliothèque JSON :
+// cdx_bus.h -- le client C++ des réglages communs et du bus de la suite CDX (voir docs/SUITE.md). En-tête seul, sans bibliothèque JSON :
 // l'appelant garde la sienne pour lire les messages reçus.
 //
-//   kdx::suite::ReadAccent()        l'accent de %APPDATA%\KDX\suite.json ("rouge" si le fichier manque ou est abîmé)
-//   kdx::suite::Watcher             sondage de la date et de la taille du fichier : Changed() à appeler toutes les 250 ms
-//   kdx::bus::Send(app, type, data) un message « tire et oublie » vers le tube \\.\pipe\kdx.<app>
-//   kdx::bus::Compose(...)          la ligne JSON d'un message (pour une connexion longue, comme celle d'AudioLinker)
+//   cdx::suite::ReadAccent()        l'accent de %APPDATA%\CDX\suite.json ("rouge" si le fichier manque ou est abîmé)
+//   cdx::suite::Watcher             sondage de la date et de la taille du fichier : Changed() à appeler toutes les 250 ms
+//   cdx::bus::Send(app, type, data) un message « tire et oublie » vers le tube \\.\pipe\cdx.<app>
+//   cdx::bus::Compose(...)          la ligne JSON d'un message (pour une connexion longue, comme celle d'AudioLinker)
 #pragma once
 
 #include <windows.h>
@@ -13,7 +13,7 @@
 #include <cstdlib>
 #include <string>
 
-namespace kdx {
+namespace cdx {
 
 constexpr int kBusMaxLine = 65536;
 
@@ -25,14 +25,14 @@ inline bool IsAccent(const std::string& s) {
     return false;
 }
 
-// KDX_SUITE_DIR remplace le dossier (réservé aux essais : ne jamais toucher aux vrais réglages).
+// CDX_SUITE_DIR remplace le dossier (réservé aux essais : ne jamais toucher aux vrais réglages).
 inline std::wstring Dir() {
     wchar_t env[MAX_PATH];
-    DWORD n = GetEnvironmentVariableW(L"KDX_SUITE_DIR", env, MAX_PATH);
+    DWORD n = GetEnvironmentVariableW(L"CDX_SUITE_DIR", env, MAX_PATH);
     if (n > 0 && n < MAX_PATH) return env;
     wchar_t* p = nullptr;
     std::wstring out;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &p)) && p) out = std::wstring(p) + L"\\KDX";
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &p)) && p) out = std::wstring(p) + L"\\CDX";
     if (p) CoTaskMemFree(p);
     return out;
 }
@@ -128,14 +128,14 @@ inline std::string Compose(const std::string& type, const std::string& from, con
     return "{\"type\":\"" + Escape(type) + "\",\"from\":\"" + Escape(from) + "\",\"data\":" + (dataJson.empty() ? "{}" : dataJson) + "}";
 }
 
-// Un message « tire et oublie » vers \\.\pipe\kdx.<app>. False : l'application n'écoute pas (ou nom inconnu, ou ligne trop longue).
+// Un message « tire et oublie » vers \\.\pipe\cdx.<app>. False : l'application n'écoute pas (ou nom inconnu, ou ligne trop longue).
 inline bool Send(const std::string& app, const std::string& type, const std::string& dataJson = "{}", const std::string& from = "kirc") {
     if (!IsApp(app)) return false;
     std::string line = Compose(type, from, dataJson) + "\n";
     if (line.size() > static_cast<size_t>(kBusMaxLine)) return false;
     wchar_t pre[64];
-    DWORD pn = GetEnvironmentVariableW(L"KDX_PIPE_PREFIX", pre, 64);   // réservé aux essais
-    std::wstring name = L"\\\\.\\pipe\\" + std::wstring(pn > 0 && pn < 64 ? pre : L"kdx.") + std::wstring(app.begin(), app.end());
+    DWORD pn = GetEnvironmentVariableW(L"CDX_PIPE_PREFIX", pre, 64);   // réservé aux essais
+    std::wstring name = L"\\\\.\\pipe\\" + std::wstring(pn > 0 && pn < 64 ? pre : L"cdx.") + std::wstring(app.begin(), app.end());
     if (!WaitNamedPipeW(name.c_str(), 250)) { if (GetLastError() != ERROR_SEM_TIMEOUT && GetLastError() != ERROR_FILE_NOT_FOUND) {} }
     HANDLE h = CreateFileW(name.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
     if (h == INVALID_HANDLE_VALUE) return false;
@@ -146,4 +146,4 @@ inline bool Send(const std::string& app, const std::string& type, const std::str
 }
 
 } // namespace bus
-} // namespace kdx
+} // namespace cdx

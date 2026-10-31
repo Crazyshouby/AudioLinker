@@ -59,7 +59,7 @@ json BuildState() {
     j["captureMode"] = g_cfg.captureMode;
     j["nativeReferenceId"] = U8(g_nativeReferenceId);
     j["theme"] = g_themeOverride;
-    j["suiteAccent"] = KdxSuiteAccent(); // the accent of the KDX suite: the pages' data-theme
+    j["suiteAccent"] = CdxSuiteAccent(); // the accent of the CDX suite: the pages' data-theme
     j["toggleHotkey"] = U8(FormatHotkey(g_toggleHotkeyMods, g_toggleHotkeyVk));
     j["switcherHotkey"] = U8(FormatHotkey(g_switcherHotkeyMods, g_switcherHotkeyVk));
     j["capturingHotkey"] = g_hotkeyCaptureId == HOTKEY_TOGGLE_GROUP ? "toggle"
@@ -132,7 +132,7 @@ json BuildState() {
 void SendState() {
     json st = BuildState();
     PostJson(st);
-    KdxLinkPublish(st); // the taskbar of the KDX shell, if it is connected
+    CdxLinkPublish(st); // the taskbar of the CDX shell, if it is connected
     UpdateTrayState(); // every state change the tray could reflect passes here
 }
 
@@ -272,7 +272,7 @@ void RememberHiddenToast(const json& j, const std::wstring& balloonText, bool sh
 // A toast appears in one window only (see PostToastTarget) and is also
 // recorded in the Journal.
 void SendError(const std::wstring& message) {
-    KdxNotifyShell("error", message);
+    CdxNotifyShell("error", message);
     json j = { { "type", "error" }, { "message", U8(message) } };
     bool shown = PostToastTarget(FromUtf8(j.dump()));
     JournalAdd(2, message);
@@ -289,7 +289,7 @@ void SendInfo(const std::wstring& message) {
 // An error toast carrying one action button, which posts `command` back.
 void SendErrorWithAction(const std::wstring& message, const std::wstring& command,
                          const std::wstring& label) {
-    KdxNotifyShell("warn", message);
+    CdxNotifyShell("warn", message);
     json j = { { "type", "error" }, { "message", U8(message) },
                { "action", U8(command) }, { "actionLabel", U8(label) } };
     bool shown = PostToastTarget(FromUtf8(j.dump()));
