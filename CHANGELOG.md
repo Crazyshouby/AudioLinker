@@ -2,7 +2,7 @@
 
 Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) ; les versions suivent [SemVer](https://semver.org/lang/fr/).
 
-## [Non publié]
+## [1.3.0] — 2026-10-31
 
 ### Modifié
 - **Notifications dans le centre rapide du shell CDX** : les erreurs et avertissements du groupe y sont aussi envoyés (une même ligne n'est pas répétée avant 10 s). Sans shell CDX, rien ne change.

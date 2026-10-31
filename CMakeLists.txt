@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 # The one place the version lives: generated into gen/version.h for the C++
 # side (Options window) and the resource script (VERSIONINFO).
-project(AudioLinker VERSION 1.2.0 LANGUAGES CXX RC)
+project(AudioLinker VERSION 1.3.0 LANGUAGES CXX RC)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
